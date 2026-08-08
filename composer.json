@@ -1,0 +1,115 @@
+{
+    "$schema": "https://getcomposer.org/schema.json",
+    "name": "artisan-studio-projects/studio-cli",
+    "description": "Artisan Studio in your terminal: scan your Laravel project on your own machine, follow its fixes and work as they happen, and see your project's health.",
+    "keywords": [
+        "laravel",
+        "artisan-studio",
+        "cli",
+        "code-health",
+        "static-analysis"
+    ],
+    "homepage": "https://github.com/artisan-studio-projects/studio-cli",
+    "license": "LicenseRef-Artisan-Studio",
+    "authors": [
+        {
+            "name": "Adam Lee",
+            "email": "adam@artisan-studio.app",
+            "role": "Developer"
+        }
+    ],
+    "require": {
+        "php": "^8.3",
+        "ext-dom": "*",
+        "ext-mbstring": "*",
+        "ext-simplexml": "*",
+        "illuminate/console": "^12.0||^13.0",
+        "illuminate/support": "^12.0||^13.0",
+        "laravel/prompts": "^0.3||^1.0",
+        "nikic/php-parser": "^5.0",
+        "saloonphp/laravel-plugin": "^4.0"
+    },
+    "require-dev": {
+        "ext-pcntl": "*",
+        "larastan/larastan": "^3.9",
+        "laravel/pint": "^1.29",
+        "laravel/pao": "^1.0",
+        "orchestra/testbench": "^10.0||^11.0",
+        "pestphp/pest": "^4.6||^5.0",
+        "pestphp/pest-plugin-laravel": "^4.1||^5.0",
+        "pestphp/pest-plugin-type-coverage": "^4.0||^5.0",
+        "phpstan/extension-installer": "^1.4"
+    },
+    "suggest": {
+        "ext-pcntl": "Redraws the dashboard the moment the terminal is resized, and lets the watcher tidy up when stopped. Without it both still work, a beat slower."
+    },
+    "autoload": {
+        "psr-4": {
+            "ArtisanStudio\\StudioCli\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "ArtisanStudio\\StudioCli\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "post-autoload-dump": [
+            "@clear",
+            "@prepare"
+        ],
+        "prepare": [
+            "@php vendor/bin/testbench package:discover --ansi"
+        ],
+        "lint": [
+            "vendor/bin/pint --parallel"
+        ],
+        "lint:check": [
+            "vendor/bin/pint --parallel --test"
+        ],
+        "analyse": [
+            "vendor/bin/phpstan analyse"
+        ],
+        "test:types": [
+            "vendor/bin/pest --type-coverage --min=100"
+        ],
+        "test:unit": [
+            "vendor/bin/pest --parallel"
+        ],
+        "test": [
+            "@analyse",
+            "@lint:check",
+            "@test:types",
+            "@test:unit"
+        ],
+        "clear": [
+            "@php vendor/bin/testbench package:purge-skeleton --ansi"
+        ],
+        "build:presence": [
+            "swiftc -O -target x86_64-apple-macos11 -o /tmp/avatardesktop-x86 src/AvatarDesktop.swift",
+            "swiftc -O -target arm64-apple-macos11 -o /tmp/avatardesktop-arm src/AvatarDesktop.swift",
+            "lipo -create /tmp/avatardesktop-x86 /tmp/avatardesktop-arm -output bin/avatardesktop",
+            "rm -f /tmp/avatardesktop-x86 /tmp/avatardesktop-arm",
+            "@php -r \"echo 'Built bin/avatardesktop for both architectures.', PHP_EOL;\""
+        ]
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "ArtisanStudio\\StudioCli\\StudioCliServiceProvider"
+            ]
+        }
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true,
+            "phpstan/extension-installer": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true,
+    "scripts-descriptions": {
+        "build:presence": "Recompile the desktop player (macOS, needs Xcode CLI tools). The binary is committed, so this is only for changing it."
+    }
+}
