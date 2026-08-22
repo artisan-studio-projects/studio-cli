@@ -1,0 +1,108 @@
+{
+    "$schema": "https://getcomposer.org/schema.json",
+    "name": "artisan-studio-projects/studio-cli",
+    "description": "Watch an Artisan Studio workflow from your own machine \u2014 a tab in `artisan dev`, files mirrored to a worktree as the artisans write them.",
+    "keywords": [
+        "laravel",
+        "artisan-studio",
+        "cli",
+        "artisan-dev",
+        "workflow"
+    ],
+    "homepage": "https://github.com/artisan-studio-projects/studio-cli",
+    "version": "0.1.0",
+    "license": "LicenseRef-Artisan-Studio",
+    "authors": [
+        {
+            "name": "Adam Lee",
+            "email": "adam.artisan.studio@gmail.com",
+            "role": "Developer"
+        }
+    ],
+    "require": {
+        "php": "^8.3",
+        "illuminate/console": "^13.0",
+        "illuminate/support": "^13.0",
+        "laravel/prompts": "^0.3||^1.0",
+        "saloonphp/laravel-plugin": "^4.0"
+    },
+    "require-dev": {
+        "larastan/larastan": "^3.9",
+        "laravel/pint": "^1.29",
+        "laravel/pao": "^1.0",
+        "orchestra/testbench": "^10.0||^11.0",
+        "pestphp/pest": "^4.6||^5.0",
+        "pestphp/pest-plugin-laravel": "^4.1||^5.0",
+        "pestphp/pest-plugin-type-coverage": "^4.0||^5.0",
+        "phpstan/extension-installer": "^1.4"
+    },
+    "autoload": {
+        "psr-4": {
+            "ArtisanStudio\\StudioCli\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "ArtisanStudio\\StudioCli\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "post-autoload-dump": [
+            "@clear",
+            "@prepare"
+        ],
+        "prepare": [
+            "@php vendor/bin/testbench package:discover --ansi"
+        ],
+        "lint": [
+            "vendor/bin/pint --parallel"
+        ],
+        "lint:check": [
+            "vendor/bin/pint --parallel --test"
+        ],
+        "analyse": [
+            "vendor/bin/phpstan analyse"
+        ],
+        "test:types": [
+            "vendor/bin/pest --type-coverage --min=100"
+        ],
+        "test:unit": [
+            "vendor/bin/pest --parallel"
+        ],
+        "test": [
+            "@analyse",
+            "@lint:check",
+            "@test:types",
+            "@test:unit"
+        ],
+        "clear": [
+            "@php vendor/bin/testbench package:purge-skeleton --ansi"
+        ],
+        "build:presence": [
+            "swiftc -O -target x86_64-apple-macos11 -o /tmp/samidesktop-x86 src/SamiDesktop.swift",
+            "swiftc -O -target arm64-apple-macos11 -o /tmp/samidesktop-arm src/SamiDesktop.swift",
+            "lipo -create /tmp/samidesktop-x86 /tmp/samidesktop-arm -output bin/samidesktop",
+            "rm -f /tmp/samidesktop-x86 /tmp/samidesktop-arm",
+            "@php -r \"echo 'Built bin/samidesktop for both architectures.', PHP_EOL;\""
+        ]
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "ArtisanStudio\\StudioCli\\StudioCliServiceProvider"
+            ]
+        }
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true,
+            "phpstan/extension-installer": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true,
+    "scripts-descriptions": {
+        "build:presence": "Recompile the desktop player (macOS, needs Xcode CLI tools). The binary is committed, so this is only for changing it."
+    }
+}
