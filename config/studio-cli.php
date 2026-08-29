@@ -23,4 +23,25 @@ return [
      * alongside the token.
      */
     'project' => env('ARTISAN_STUDIO_PROJECT'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Branches and commits
+    |--------------------------------------------------------------------------
+    |
+    | Fixes and builds are made on branches of their own, named with these
+    | prefixes, and their commits carry `commit_scope`, as in feat(scope):.
+    | Only branches with these prefixes are ever committed to or sent for a
+    | pull request. Artisan Studio opens pull requests only from branches it
+    | knows, so change a prefix only once your studio accepts it. `lock` is
+    | the file in .git that keeps two fixers from committing at once.
+    |
+    */
+
+    'branches' => [
+        'fixes' => env('STUDIO_CLI_FIX_BRANCH_PREFIX', 'sami/fixes-'),
+        'build' => env('STUDIO_CLI_BUILD_BRANCH_PREFIX', 'sami/build-'),
+        'commit_scope' => env('STUDIO_CLI_COMMIT_SCOPE', 'sami'),
+        'lock' => 'sami-fixes.lock',
+    ],
 ];
