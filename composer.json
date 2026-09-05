@@ -10,7 +10,6 @@
         "workflow"
     ],
     "homepage": "https://github.com/artisan-studio-projects/studio-cli",
-    "version": "0.1.0",
     "license": "LicenseRef-Artisan-Studio",
     "authors": [
         {
