@@ -43,6 +43,10 @@ final class Delegate: NSObject, NSApplicationDelegate {
     private var layers: [AVPlayerLayer] = []
     private var loopers: [AVPlayerLooper?] = [nil, nil]
     private var front = 0
+
+    /// A one-shot clip that arrived mid-loop, waiting for the loop to come round.
+    private var queued: URL?
+    private var waitingOnLoop: Any?
     private let source: URL
     private let side: CGFloat
     private let loops: Bool
@@ -284,13 +288,60 @@ final class Delegate: NSObject, NSApplicationDelegate {
         heardSoFar.append(Character(UnicodeScalar(byte)))
     }
 
+    /// Play a one-shot clip once the loop reaches its end, rather than cutting in.
+    ///
+    /// She is typing, or lifting a hand, or halfway through a glance — swapping
+    /// on the instant a beat arrives snaps her out of it. The loop returns to
+    /// the frame it opened on, which is the frame every spoken clip opens on
+    /// too, so waiting for it is what makes the two join without a jump.
+    private func playAtTheEndOfTheLoop(_ url: URL) {
+        guard let item = players[front].currentItem, loopers[front] != nil else {
+            play(url, looping: false)
+
+            return
+        }
+
+        queued = url
+
+        if let waiting = waitingOnLoop {
+            NotificationCenter.default.removeObserver(waiting)
+        }
+
+        waitingOnLoop = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: item,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self, let next = self.queued else { return }
+
+            self.queued = nil
+
+            if let waiting = self.waitingOnLoop {
+                NotificationCenter.default.removeObserver(waiting)
+                self.waitingOnLoop = nil
+            }
+
+            self.play(next, looping: false)
+        }
+    }
+
     private func wasToldToPlay(_ line: String) {
         let wantsLoop = line.hasSuffix(" --loop")
         let path = wantsLoop ? String(line.dropLast(7)) : line
 
         guard FileManager.default.fileExists(atPath: path) else { return }
 
-        play(URL(fileURLWithPath: path), looping: wantsLoop)
+        let url = URL(fileURLWithPath: path)
+
+        if wantsLoop {
+            queued = nil
+
+            play(url, looping: true)
+
+            return
+        }
+
+        playAtTheEndOfTheLoop(url)
     }
 
     private func listenForClips() {
