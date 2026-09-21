@@ -6,6 +6,7 @@ namespace ArtisanStudio\StudioCli;
 
 use ArtisanStudio\StudioCli\Saloon\Requests\ListProjectsRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\ListWorkflowsRequest;
+use ArtisanStudio\StudioCli\Saloon\Requests\SubmitReviewRequest;
 use ArtisanStudio\StudioCli\Saloon\StudioConnector;
 use Closure;
 use RuntimeException;
@@ -57,6 +58,18 @@ class Studio
         return $this->connector()
             ->send(new ListWorkflowsRequest($this->project()))
             ->json('workflows', []);
+    }
+
+    /**
+     * Hand a finished review back, and let the build carry on.
+     *
+     * @param  array<string, mixed>  $review
+     */
+    public function submitReview(string $workflow, array $review): bool
+    {
+        return $this->connector()
+            ->send(new SubmitReviewRequest($this->project(), $workflow, $review))
+            ->successful();
     }
 
     /** @param  Closure(array<string, mixed>): void  $onEvent */
