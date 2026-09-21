@@ -13,7 +13,7 @@ class Workspace
     public function whyItCannotWatch(): ?string
     {
         if (! $this->isGitRepository()) {
-            return 'This is not a git repository, so there is nowhere to put a preview worktree.';
+            return 'This is not a git repository, so there is no branch for a build to follow.';
         }
 
         if ($this->hasUncommittedChanges()) {
@@ -21,41 +21,6 @@ class Workspace
         }
 
         return null;
-    }
-
-    public function worktreePathFor(string $reference): string
-    {
-        $base = (string) config('studio-cli.worktree.path', '../artisan-studio-preview');
-
-        $base = str_starts_with($base, '/')
-            ? $base
-            : $this->root.'/'.$base;
-
-        return rtrim($base, '/').'/'.$reference;
-    }
-
-    public function openWorktree(string $reference, string $branch): string
-    {
-        $path = $this->worktreePathFor($reference);
-
-        if (is_dir($path)) {
-            return $path;
-        }
-
-        $this->git(['worktree', 'add', '--detach', $path, $branch]);
-
-        return $path;
-    }
-
-    public function closeWorktree(string $reference): void
-    {
-        $path = $this->worktreePathFor($reference);
-
-        if (! is_dir($path)) {
-            return;
-        }
-
-        $this->git(['worktree', 'remove', '--force', $path]);
     }
 
     public function fetch(): void

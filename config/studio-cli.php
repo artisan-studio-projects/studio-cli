@@ -26,26 +26,6 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Preview worktree
-    |--------------------------------------------------------------------------
-    |
-    | Where a workflow's files are mirrored to.
-    |
-    | A worktree rather than the working tree, and OUTSIDE the repository: the
-    | branch you are on stays where you left it, several workflows can be open
-    | at once, and — the point — what the artisans are writing is somewhere you
-    | cannot mistake for your own work.
-    |
-    | Relative paths resolve against the project root.
-    |
-    */
-
-    'worktree' => [
-        'path' => env('ARTISAN_STUDIO_WORKTREE', '../artisan-studio-preview'),
-    ],
-
-    /*
-    |--------------------------------------------------------------------------
     | Watching
     |--------------------------------------------------------------------------
     |
@@ -61,6 +41,21 @@ return [
     'watch' => [
         'reconnect_seconds' => (int) env('ARTISAN_STUDIO_RECONNECT', 5),
         'max_reconnect_seconds' => (int) env('ARTISAN_STUDIO_RECONNECT_MAX', 60),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Review
+    |--------------------------------------------------------------------------
+    |
+    | `artisan-studio:review` waits while you edit and shows what you have
+    | touched. This is how often it asks git — cheap enough to be frequent
+    | (tens of milliseconds on a large repository), slow enough to be invisible.
+    |
+    */
+
+    'review' => [
+        'poll_seconds' => (int) env('ARTISAN_STUDIO_REVIEW_POLL', 10),
     ],
 
     /*

@@ -6,6 +6,7 @@ namespace ArtisanStudio\StudioCli;
 
 use ArtisanStudio\StudioCli\Console\BuildPresenceCommand;
 use ArtisanStudio\StudioCli\Console\LinkCommand;
+use ArtisanStudio\StudioCli\Console\ReviewCommand;
 use ArtisanStudio\StudioCli\Console\WatchCommand;
 use Illuminate\Foundation\DevCommands;
 use Illuminate\Support\ServiceProvider;
@@ -20,7 +21,7 @@ class StudioCliServiceProvider extends ServiceProvider
 
         $this->app->singleton(Workspace::class, fn (): Workspace => new Workspace($this->app->basePath()));
 
-        $this->app->singleton(Mirror::class);
+        $this->app->singleton(LocalChanges::class, fn (): LocalChanges => new LocalChanges($this->app->basePath()));
     }
 
     public function boot(): void
@@ -32,6 +33,7 @@ class StudioCliServiceProvider extends ServiceProvider
         $this->commands([
             BuildPresenceCommand::class,
             LinkCommand::class,
+            ReviewCommand::class,
             WatchCommand::class,
         ]);
 

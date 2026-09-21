@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace ArtisanStudio\StudioCli\Console;
 
-use ArtisanStudio\StudioCli\Mirror;
 use ArtisanStudio\StudioCli\Presence;
 use ArtisanStudio\StudioCli\Studio;
 use ArtisanStudio\StudioCli\Workspace;
@@ -16,14 +15,13 @@ class WatchCommand extends Command
     public const string SIGNATURE = 'artisan-studio:watch';
 
     protected $signature = self::SIGNATURE.'
-        {--once : Print the current state and exit, rather than staying open}
-        {--no-mirror : Follow the workflow without writing any files}';
+        {--once : Print the current state and exit, rather than staying open}';
 
     protected $description = 'Watch an Artisan Studio workflow from this machine';
 
     protected bool $keepWatching = true;
 
-    public function handle(Studio $studio, Workspace $workspace, Mirror $mirror, Presence $sami): int
+    public function handle(Studio $studio, Workspace $workspace, Presence $sami): int
     {
         if (! $studio->isLinked()) {
             return $this->explainHowToLink();
@@ -36,14 +34,14 @@ class WatchCommand extends Command
         $this->sendHerAwayOnExit($sami);
 
         if (! $workspace->isGitRepository()) {
-            $this->components->error('This is not a git repository, so there is nowhere to put a preview worktree.');
+            $this->components->error('This is not a git repository, so there is no branch for a build to follow.');
 
             return self::SUCCESS;
         }
 
         return $this->option('once')
             ? $this->reportOnce($studio)
-            : $this->follow($studio, $mirror, $sami);
+            : $this->follow($studio, $sami);
     }
 
     private function explainHowToLink(): int
@@ -98,7 +96,7 @@ class WatchCommand extends Command
         return self::SUCCESS;
     }
 
-    private function follow(Studio $studio, Mirror $mirror, Presence $sami): int
+    private function follow(Studio $studio, Presence $sami): int
     {
         $wait = max(1, (int) config('studio-cli.watch.reconnect_seconds', 5));
         $ceiling = max($wait, (int) config('studio-cli.watch.max_reconnect_seconds', 60));
@@ -109,7 +107,7 @@ class WatchCommand extends Command
 
         while ($this->keepWatching) {
             try {
-                $studio->stream(function (array $event) use ($mirror, $sami): void {
+                $studio->stream(function (array $event) use ($sami): void {
                     if (($event['kind'] ?? null) === 'tick') {
                         $sami->settle();
 
@@ -119,10 +117,6 @@ class WatchCommand extends Command
                     $this->render($event);
 
                     $sami->react($event);
-
-                    if (! $this->option('no-mirror')) {
-                        $mirror->apply($event);
-                    }
                 });
 
                 $wait = max(1, (int) config('studio-cli.watch.reconnect_seconds', 5));
