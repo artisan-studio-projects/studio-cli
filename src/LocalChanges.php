@@ -70,9 +70,9 @@ class LocalChanges
      * are about to commit to it, and a commit on a detached head is one a
      * closed terminal loses.
      */
-    public function switchTo(string $branch): bool
+    public function switchTo(string $branch, ?string $remote = null): bool
     {
-        $this->tryToFetch();
+        $this->tryToFetch($remote);
 
         if ($this->currentBranch() === $branch) {
             return true;
@@ -98,14 +98,25 @@ class LocalChanges
     /**
      * Refresh what the clone knows, if it can do so without asking anybody.
      *
-     * Best-effort by design: the branch is usually already known — the studio
-     * cut it minutes ago and this machine has been reading that studio's stream
-     * ever since — so a fetch that cannot authenticate costs nothing worth
-     * stopping a review for.
+     * ★ WITH THE STUDIO'S CREDENTIAL, NOT THE DEVELOPER'S. A fetch from
+     * `origin` over SSH stops dead on a passphrase-protected key, which is most
+     * developers — and telling somebody to load a key before the tool works is
+     * a broken tool. The studio already commits to this repository through its
+     * own GitHub App, so it lends that for one fetch and nobody is asked for
+     * anything.
+     *
+     * Still best-effort: without a remote to borrow it tries `origin` and
+     * carries on either way, since the ref is often already in the clone.
      */
-    private function tryToFetch(): void
+    private function tryToFetch(?string $remote = null): void
     {
-        $this->git(['fetch', '--quiet', '--prune'], timeout: 15);
+        if ($remote === null) {
+            $this->git(['fetch', '--quiet', '--prune'], timeout: 15);
+
+            return;
+        }
+
+        $this->git(['fetch', '--quiet', $remote, '+refs/heads/*:refs/remotes/origin/*'], timeout: 30);
     }
 
     /**

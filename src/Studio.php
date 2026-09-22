@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ArtisanStudio\StudioCli;
 
+use ArtisanStudio\StudioCli\Saloon\Requests\CheckoutRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\CommandResultRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\ListProjectsRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\ListWorkflowsRequest;
@@ -84,6 +85,18 @@ class Studio
         $response = $this->connector()->send(new NextCommandRequest($this->project()));
 
         return $response->successful() ? $response->json('command') : null;
+    }
+
+    /**
+     * Where to fetch this build's branch from, borrowed from the studio.
+     *
+     * @return array{branch: string, remote: string}|null
+     */
+    public function howToReach(string $workflow): ?array
+    {
+        $response = $this->connector()->send(new CheckoutRequest($this->project(), $workflow));
+
+        return $response->successful() ? $response->json() : null;
     }
 
     /** @param  array{output: string, exit_code: int, error: ?string}  $result */

@@ -153,7 +153,7 @@ class ReviewCommand extends Command
     /** @param  array<string, mixed>  $event */
     private function stepIn(Studio $studio, LocalChanges $changes, array $event, string $branch): void
     {
-        if (! $this->readyTheBranch($changes, $branch, $this->whatIsBeingReviewed($event))) {
+        if (! $this->readyTheBranch($studio, $changes, $event, $branch)) {
             return;
         }
 
@@ -215,8 +215,11 @@ class ReviewCommand extends Command
      * uncommitted work onto somebody else's branch is how a change ends up in a
      * commit nobody meant to make.
      */
-    private function readyTheBranch(LocalChanges $changes, string $branch, string $what): bool
+    /** @param  array<string, mixed>  $event */
+    private function readyTheBranch(Studio $studio, LocalChanges $changes, array $event, string $branch): bool
     {
+        $what = $this->whatIsBeingReviewed($event);
+
         if ($branch === '') {
             $this->components->warn('This build has no branch yet, so there is nothing to check out.');
 
@@ -237,7 +240,7 @@ class ReviewCommand extends Command
             return false;
         }
 
-        if (! $changes->switchTo($branch)) {
+        if (! $changes->switchTo($branch, $this->whereToFetchFrom($studio, $event))) {
             $this->components->error('Could not check out '.$branch.'. The build is still waiting.');
 
             return false;
@@ -246,6 +249,29 @@ class ReviewCommand extends Command
         $changes->catchUp();
 
         return true;
+    }
+
+    /**
+     * Where to fetch this branch from, asked of the studio.
+     *
+     * Null when the studio cannot say, in which case the fetch falls back to
+     * whatever remote the clone already has — which is right for anybody whose
+     * git credential works without being asked for.
+     *
+     * @param  array<string, mixed>  $event
+     */
+    private function whereToFetchFrom(Studio $studio, array $event): ?string
+    {
+        $meta = (array) ($event['meta'] ?? []);
+        $workflow = (string) ($meta['workflow'] ?? '');
+
+        if ($workflow === '') {
+            return null;
+        }
+
+        $reach = $studio->howToReach($workflow);
+
+        return is_array($reach) ? ($reach['remote'] ?? null) : null;
     }
 
     /**
