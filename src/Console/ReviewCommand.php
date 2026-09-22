@@ -153,13 +153,13 @@ class ReviewCommand extends Command
     /** @param  array<string, mixed>  $event */
     private function stepIn(Studio $studio, LocalChanges $changes, array $event, string $branch): void
     {
-        $priorBranch = $changes->currentBranch();
+        $priorSha = $changes->currentSha();
 
         if (! $this->readyTheBranch($studio, $changes, $event, $branch)) {
             return;
         }
 
-        $this->showWhatTheArtisanBuilt($changes, $priorBranch, $branch);
+        $this->showWhatTheArtisanBuilt($changes, $priorSha);
 
         $this->components->info('Ready. Edit what you need — I will check every '.$this->pollSeconds().'s.');
 
@@ -231,6 +231,8 @@ class ReviewCommand extends Command
         }
 
         if ($changes->currentBranch() === $branch) {
+            $changes->catchUp();
+
             return true;
         }
 
@@ -264,14 +266,14 @@ class ReviewCommand extends Command
      * checkpoint is what the artisan built, and until now nothing here ever
      * showed it.
      */
-    private function showWhatTheArtisanBuilt(LocalChanges $changes, string $priorBranch, string $branch): void
+    private function showWhatTheArtisanBuilt(LocalChanges $changes, string $priorSha): void
     {
-        if ($priorBranch === $branch) {
+        if ($priorSha === $changes->currentSha()) {
             return;
         }
 
-        $files = $changes->whatLandedSince($priorBranch);
-        $commits = $changes->commitsSince($priorBranch);
+        $files = $changes->whatLandedSince($priorSha);
+        $commits = $changes->commitsSince($priorSha);
 
         $this->newLine();
         $this->components->twoColumnDetail('<fg=cyan>What landed on this branch</>', '');
@@ -284,7 +286,7 @@ class ReviewCommand extends Command
         }
 
         if ($files === []) {
-            $this->line('  <fg=gray>no file changes found against '.$priorBranch.'</>');
+            $this->line('  <fg=gray>no file changes found against '.$priorSha.'</>');
 
             return;
         }

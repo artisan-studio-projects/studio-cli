@@ -62,6 +62,11 @@ class LocalChanges
         return trim($this->git(['rev-parse', '--abbrev-ref', 'HEAD']));
     }
 
+    public function currentSha(): string
+    {
+        return trim($this->git(['rev-parse', 'HEAD']));
+    }
+
     /**
      * Put the developer on the build's branch.
      *
