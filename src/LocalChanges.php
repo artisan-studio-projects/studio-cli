@@ -40,6 +40,29 @@ class LocalChanges
         )));
     }
 
+    /**
+     * Lines added and removed per path since the last commit.
+     *
+     * A file nobody has committed yet has no before, so every line in it
+     * counts as added.
+     *
+     * @return array<string, array{path: string, added: int, removed: int}>
+     */
+    public function lineChangesSinceTheLastCommit(): array
+    {
+        $tracked = array_filter(array_map(
+            fn (string $line): ?array => $this->readNumstatLine($line),
+            array_filter(explode("\n", $this->git(['diff', '--numstat', 'HEAD']))),
+        ));
+
+        $untracked = array_map(
+            fn (string $path): array => ['path' => $path, 'added' => $this->linesIn($path), 'removed' => 0],
+            array_filter(explode("\n", $this->git(['ls-files', '--others', '--exclude-standard']))),
+        );
+
+        return array_column([...$tracked, ...$untracked], null, 'path');
+    }
+
     /** Stage everything and commit it, returning the new sha. */
     public function commitEverything(string $message): ?string
     {
@@ -143,6 +166,37 @@ class LocalChanges
             str_starts_with($code, 'R') => 'renamed',
             default => 'modified',
         }];
+    }
+
+    /**
+     * One `git diff --numstat` line as a path and its counts.
+     *
+     * A binary file reports `-` for both, which is nothing to count.
+     *
+     * @return array{path: string, added: int, removed: int}|null
+     */
+    private function readNumstatLine(string $line): ?array
+    {
+        $parts = explode("\t", trim($line), 3);
+
+        if (count($parts) < 3) {
+            return null;
+        }
+
+        return ['path' => $parts[2], 'added' => (int) $parts[0], 'removed' => (int) $parts[1]];
+    }
+
+    private function linesIn(string $path): int
+    {
+        $full = $this->root.'/'.$path;
+
+        if (! is_file($full)) {
+            return 0;
+        }
+
+        $contents = (string) file_get_contents($full);
+
+        return $contents === '' ? 0 : substr_count(rtrim($contents, "\n"), "\n") + 1;
     }
 
     /** Bring the branch up to date, without ever merging over local work. */

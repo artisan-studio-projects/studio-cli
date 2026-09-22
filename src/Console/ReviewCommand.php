@@ -291,7 +291,7 @@ class ReviewCommand extends Command
             return;
         }
 
-        $this->renderChanged($files, showPrompt: false);
+        $this->renderChanged($files);
     }
 
     /**
@@ -389,15 +389,16 @@ class ReviewCommand extends Command
      */
     private function waitForYouToFinish(LocalChanges $changes): array
     {
-        $seen = [];
+        $this->line('  <fg=gray>press enter when you are done</>');
+        $this->newLine();
+
+        $printed = [];
 
         while (true) {
-            $files = $changes->sinceTheLastCommit();
+            $now = $this->whereEachFileStands($changes);
 
-            if ($files !== $seen) {
-                $this->renderChanged($files);
-                $seen = $files;
-            }
+            $this->announceWhatMoved($now, $printed);
+            $printed = $now;
 
             if ($this->pressedEnter()) {
                 return $changes->sinceTheLastCommit();
@@ -407,38 +408,92 @@ class ReviewCommand extends Command
         }
     }
 
+    /**
+     * Every file the developer has touched, with how much of it moved.
+     *
+     * @return array<string, array{status: string, added: int, removed: int}>
+     */
+    private function whereEachFileStands(LocalChanges $changes): array
+    {
+        $lines = $changes->lineChangesSinceTheLastCommit();
+
+        return array_column(array_map(
+            fn (array $file): array => [
+                'path' => $file['path'],
+                'status' => $file['status'],
+                'added' => $lines[$file['path']]['added'] ?? 0,
+                'removed' => $lines[$file['path']]['removed'] ?? 0,
+            ],
+            $changes->sinceTheLastCommit(),
+        ), null, 'path');
+    }
+
+    /**
+     * Say what changed since the last look — and only that.
+     *
+     * ★ A RUNNING LOG, NOT A REPRINT. The whole list used to be printed again
+     * whenever anything in it moved, so a file added once appeared twice the
+     * moment a second file was touched, and "press enter" repeated with it.
+     * Each line now is one event: a file appearing, growing, or going back to
+     * how it was.
+     *
+     * @param  array<string, array{path: string, status: string, added: int, removed: int}>  $now
+     * @param  array<string, array{path: string, status: string, added: int, removed: int}>  $before
+     */
+    private function announceWhatMoved(array $now, array $before): void
+    {
+        $moved = array_filter($now, fn (array $file, string $path): bool => ($before[$path] ?? null) !== $file, ARRAY_FILTER_USE_BOTH);
+        $undone = array_diff_key($before, $now);
+
+        array_map(fn (array $file) => $this->announce($file), $moved);
+        array_map(fn (array $file) => $this->announce([...$file, 'status' => 'reverted', 'added' => 0, 'removed' => 0]), $undone);
+    }
+
+    /** @param  array{path: string, status: string, added: int, removed: int}  $file */
+    private function announce(array $file): void
+    {
+        $this->line(sprintf(
+            '  <fg=gray>%s</>  <fg=%s>%s</> %s  %s',
+            date('H:i:s'),
+            $this->colourOf($file['status']),
+            str_pad($file['status'], 9),
+            $file['path'],
+            $this->howMuch($file['added'], $file['removed']),
+        ));
+    }
+
+    private function howMuch(int $added, int $removed): string
+    {
+        return trim(implode(' ', array_filter([
+            $added > 0 ? '<fg=green>+'.$added.'</>' : null,
+            $removed > 0 ? '<fg=red>−'.$removed.'</>' : null,
+        ])));
+    }
+
+    private function colourOf(string $status): string
+    {
+        return match ($status) {
+            'added' => 'green',
+            'deleted' => 'red',
+            'renamed' => 'blue',
+            'reverted' => 'gray',
+            default => 'yellow',
+        };
+    }
+
     /** @param  list<array{path: string, status: string}>  $files */
-    private function renderChanged(array $files, bool $showPrompt = true): void
+    private function renderChanged(array $files): void
     {
         $this->newLine();
 
-        if ($files === []) {
-            $this->line('  <fg=gray>nothing changed yet</>');
+        array_map(fn (array $file) => $this->line(sprintf(
+            '  <fg=%s>%s</> %s',
+            $this->colourOf($file['status']),
+            str_pad($file['status'], 9),
+            $file['path'],
+        )), $files);
 
-            if ($showPrompt) {
-                $this->line('  <fg=gray>press enter when you are done</>');
-            }
-
-            return;
-        }
-
-        foreach ($files as $file) {
-            $this->line(sprintf(
-                '  <fg=%s>%s</> %s',
-                match ($file['status']) {
-                    'added' => 'green',
-                    'deleted' => 'red',
-                    'renamed' => 'blue',
-                    default => 'yellow',
-                },
-                str_pad($file['status'], 9),
-                $file['path'],
-            ));
-        }
-
-        if ($showPrompt) {
-            $this->line('  <fg=gray>press enter when you are done</>');
-        }
+        $this->newLine();
     }
 
     /**

@@ -130,3 +130,13 @@ it('carries on when a remote it cannot reach refuses it', function (): void {
     expect(microtime(true) - $started)->toBeLessThan(16.0)
         ->and($changes->isClean())->toBeTrue();
 });
+
+it('counts the lines each file gained and lost, a new file as wholly added', function (): void {
+    file_put_contents($this->repo.'/app/Livewire/Invites.php', "<?php\n// thinned out\n// and more\n");
+    file_put_contents($this->repo.'/app/Livewire/MetricsDashboard.php', "<?php\n\nclass MetricsDashboard {}\n");
+
+    $lines = (new LocalChanges($this->repo))->lineChangesSinceTheLastCommit();
+
+    expect($lines['app/Livewire/Invites.php'])->toMatchArray(['added' => 3, 'removed' => 1])
+        ->and($lines['app/Livewire/MetricsDashboard.php'])->toMatchArray(['added' => 3, 'removed' => 0]);
+});
