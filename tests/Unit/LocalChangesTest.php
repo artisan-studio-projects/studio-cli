@@ -140,3 +140,28 @@ it('counts the lines each file gained and lost, a new file as wholly added', fun
     expect($lines['app/Livewire/Invites.php'])->toMatchArray(['added' => 3, 'removed' => 1])
         ->and($lines['app/Livewire/MetricsDashboard.php'])->toMatchArray(['added' => 3, 'removed' => 0]);
 });
+
+it('puts the review on the build branch where the next artisan will see it', function (): void {
+    $remote = $this->repo.'-remote.git';
+    (new Process(['git', 'init', '--bare', '--quiet', $remote]))->run();
+
+    file_put_contents($this->repo.'/app/Livewire/MetricsDashboard.php', '<?php // the developer added this');
+    commitEverythingIn($this->repo, 'fix(metrics): the component that was missing');
+
+    $pushed = (new LocalChanges($this->repo))->publish('sami/sandbox-metrics', $remote);
+
+    $onGitHub = new Process(['git', 'log', '-1', '--format=%s', 'sami/sandbox-metrics'], $remote);
+    $onGitHub->run();
+
+    exec('rm -rf '.escapeshellarg($remote));
+
+    expect($pushed)->toBeTrue()
+        ->and(trim($onGitHub->getOutput()))->toBe('fix(metrics): the component that was missing');
+});
+
+it('reads the scope the build commits under', function (): void {
+    file_put_contents($this->repo.'/app/Livewire/Invites.php', '<?php // pixel again');
+    commitEverythingIn($this->repo, 'feat(project-metrics-dashboard): @pixel created the layout');
+
+    expect((new LocalChanges($this->repo))->scopeOfTheLastCommit())->toBe('project-metrics-dashboard');
+});

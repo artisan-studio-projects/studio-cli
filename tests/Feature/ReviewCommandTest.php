@@ -92,3 +92,16 @@ it('prints each change once, as it happens, rather than the whole list again', f
         ->and($printed)->toContain('−1')
         ->and($printed)->toContain('reverted');
 });
+
+it('writes the review as a conventional commit in the build\'s own scope', function (): void {
+    $message = (new ReflectionMethod(ReviewCommand::class, 'commitMessage'))->invoke(
+        app(ReviewCommand::class),
+        ['agent' => 'pixel'],
+        "Livewire component missing so app shell never rendered\nAdded MetricsDashboard and routed to it.",
+        'project-metrics-dashboard',
+    );
+
+    expect($message)->toStartWith('fix(project-metrics-dashboard): livewire component missing so app shell never rendered')
+        ->and($message)->toContain('Reviewed after @pixel.')
+        ->and($message)->toContain('Added MetricsDashboard and routed to it.');
+});

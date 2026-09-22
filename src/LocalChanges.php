@@ -75,6 +75,31 @@ class LocalChanges
         return $sha === '' ? null : $sha;
     }
 
+    /**
+     * Put this commit on the build's branch on GitHub.
+     *
+     * ★ A LOCAL COMMIT IS NOT A REVIEW. The next artisan commits through
+     * GitHub, so a fix that only exists on this machine is a fix it never sees
+     * — the build carried on from the branch as it was, and the developer's
+     * change sat stranded behind it. With the studio's own credential when it
+     * lends one, so a passphrase-protected key does not stop it.
+     */
+    public function publish(string $branch, ?string $remote = null): bool
+    {
+        return $this->succeeds(['push', $remote ?? 'origin', 'HEAD:refs/heads/'.$branch], timeout: 60);
+    }
+
+    /**
+     * The scope the build's own commits use, so a review reads as part of
+     * the same history rather than as something bolted on.
+     */
+    public function scopeOfTheLastCommit(): ?string
+    {
+        $subject = trim($this->git(['log', '-1', '--format=%s']));
+
+        return preg_match('/^[a-z]+\(([^)]+)\)!?:/', $subject, $match) === 1 ? $match[1] : null;
+    }
+
     public function isClean(): bool
     {
         return $this->sinceTheLastCommit() === [];
@@ -275,6 +300,15 @@ class LocalChanges
         }
 
         return str_contains($code, 'D') ? 'deleted' : 'modified';
+    }
+
+    /** @param  list<string>  $arguments */
+    private function succeeds(array $arguments, ?int $timeout = 30): bool
+    {
+        $process = new Process(['git', ...$arguments], $this->root, $this->neverAsking(), timeout: $timeout);
+        $process->run();
+
+        return $process->isSuccessful();
     }
 
     /** @param  list<string>  $arguments */

@@ -198,7 +198,11 @@ class ReviewCommand extends Command
             hint: 'Optional. Leave empty if the change speaks for itself.',
         );
 
-        $sha = $changes->commitEverything($this->commitMessage($event, $note));
+        $sha = $changes->commitEverything($this->commitMessage($event, $note, $changes->scopeOfTheLastCommit()));
+
+        if (! $this->pushUntilItLands($studio, $changes, $event, $branch)) {
+            return;
+        }
 
         $this->handBack($studio, $event, [
             'outcome' => 'updated',
@@ -531,14 +535,41 @@ class ReviewCommand extends Command
     }
 
     /** @param  array<string, mixed>  $event */
-    private function commitMessage(array $event, string $note): string
+    private function commitMessage(array $event, string $note, ?string $scope): string
     {
         $agent = (string) ($event['agent'] ?? 'artisan');
-        $first = trim(explode("\n", $note)[0] ?? '');
+        $lines = explode("\n", trim($note));
+        $subject = trim(array_shift($lines)) ?: 'changes after the '.$agent.' checkpoint';
+        $type = $scope === null ? 'fix' : 'fix('.$scope.')';
+        $rest = trim(implode("\n", $lines));
 
-        return $first === ''
-            ? 'review: changes after '.$agent
-            : 'review: '.$first;
+        return $type.': '.lcfirst($subject)
+            ."\n\nReviewed after @".$agent.'.'
+            .($rest === '' ? '' : "\n\n".$rest);
+    }
+
+    /**
+     * Push the review, and keep the build held until it is on GitHub.
+     *
+     * Releasing the build with the commit still local is what let the next
+     * artisan carry on without it. So a failed push is said out loud and can
+     * be tried again; declining leaves the build waiting, never running ahead.
+     *
+     * @param  array<string, mixed>  $event
+     */
+    private function pushUntilItLands(Studio $studio, LocalChanges $changes, array $event, string $branch): bool
+    {
+        while (! $changes->publish($branch, $this->whereToFetchFrom($studio, $event))) {
+            $this->components->error('Committed here, but could not push it to '.$branch.' on GitHub.');
+
+            if (! confirm(label: 'Try pushing again?', default: true)) {
+                $this->components->warn('Left unpushed, and the build is still waiting. Push '.$branch.' yourself, then press Continue in the studio.');
+
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
