@@ -5,8 +5,11 @@ declare(strict_types=1);
 use ArtisanStudio\StudioCli\Console\ReviewCommand;
 use ArtisanStudio\StudioCli\Saloon\Requests\SubmitReviewRequest;
 use ArtisanStudio\StudioCli\Studio;
+use Illuminate\Console\OutputStyle;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Laravel\Facades\Saloon;
+use Symfony\Component\Console\Input\ArrayInput;
+use Symfony\Component\Console\Output\BufferedOutput;
 
 /*
 |--------------------------------------------------------------------------
@@ -65,4 +68,27 @@ it('says so when the studio will not take the review', function (): void {
 
     expect(app(Studio::class)->submitReview('wf-1', ['agent' => 'pixel', 'outcome' => 'accepted']))
         ->toBeFalse();
+});
+
+it('prints each change once, as it happens, rather than the whole list again', function (): void {
+    $buffer = new BufferedOutput;
+    $command = app(ReviewCommand::class);
+    $command->setOutput(new OutputStyle(new ArrayInput([]), $buffer));
+
+    $announce = new ReflectionMethod($command, 'announceWhatMoved');
+
+    $component = ['path' => 'app/Livewire/MetricsDashboard.php', 'status' => 'added', 'added' => 42, 'removed' => 0];
+    $route = ['path' => 'routes/web.php', 'status' => 'modified', 'added' => 2, 'removed' => 1];
+
+    $announce->invoke($command, [$component['path'] => $component], []);
+    $announce->invoke($command, [$component['path'] => $component, $route['path'] => $route], [$component['path'] => $component]);
+    $announce->invoke($command, [$component['path'] => $component], [$component['path'] => $component, $route['path'] => $route]);
+
+    $printed = $buffer->fetch();
+
+    expect(substr_count($printed, 'app/Livewire/MetricsDashboard.php'))->toBe(1)
+        ->and($printed)->toContain('+42')
+        ->and($printed)->toContain('+2')
+        ->and($printed)->toContain('−1')
+        ->and($printed)->toContain('reverted');
 });
