@@ -72,7 +72,7 @@ class LocalChanges
      */
     public function switchTo(string $branch): bool
     {
-        $this->git(['fetch', '--quiet', '--prune']);
+        $this->tryToFetch();
 
         if ($this->currentBranch() === $branch) {
             return true;
@@ -92,7 +92,20 @@ class LocalChanges
     /** Bring the branch up to date, without ever merging over local work. */
     public function catchUp(): void
     {
-        $this->git(['pull', '--ff-only', '--quiet']);
+        $this->git(['pull', '--ff-only', '--quiet'], timeout: 20);
+    }
+
+    /**
+     * Refresh what the clone knows, if it can do so without asking anybody.
+     *
+     * Best-effort by design: the branch is usually already known — the studio
+     * cut it minutes ago and this machine has been reading that studio's stream
+     * ever since — so a fetch that cannot authenticate costs nothing worth
+     * stopping a review for.
+     */
+    private function tryToFetch(): void
+    {
+        $this->git(['fetch', '--quiet', '--prune'], timeout: 15);
     }
 
     /**
@@ -144,11 +157,37 @@ class LocalChanges
     }
 
     /** @param  list<string>  $arguments */
-    private function git(array $arguments): string
+    private function git(array $arguments, ?int $timeout = 30): string
     {
-        $process = new Process(['git', ...$arguments], $this->root);
+        $process = new Process(['git', ...$arguments], $this->root, $this->neverAsking(), timeout: $timeout);
         $process->run();
 
         return $process->isSuccessful() ? $process->getOutput() : '';
+    }
+
+    /**
+     * Environment that makes git fail rather than ask.
+     *
+     * ★ A PASSWORD PROMPT KILLED THE PAIRING SESSION. `git fetch` on an SSH
+     * remote with a passphrase-protected key stops and waits for input — but
+     * nothing is reading that input, so it sat there until the process timed
+     * out and took the whole review down with it: "Lost the studio", over a
+     * credential the fetch did not need.
+     *
+     * So git is told there is nobody to ask. A fetch that cannot authenticate
+     * comes back empty and the refs already in the clone are used instead,
+     * which is almost always enough — the branch was cut minutes ago by a
+     * studio this machine has been talking to all along.
+     *
+     * @return array<string, string>
+     */
+    private function neverAsking(): array
+    {
+        return [
+            'GIT_TERMINAL_PROMPT' => '0',
+            'GIT_ASKPASS' => 'true',
+            'SSH_ASKPASS' => 'true',
+            'GIT_SSH_COMMAND' => 'ssh -oBatchMode=yes -oStrictHostKeyChecking=accept-new',
+        ];
     }
 }

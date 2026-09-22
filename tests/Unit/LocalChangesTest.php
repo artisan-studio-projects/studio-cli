@@ -96,3 +96,37 @@ it('reads a path with a space in it', function (): void {
     expect((new LocalChanges($this->repo))->sinceTheLastCommit())
         ->toBe([['path' => 'app/Livewire/Invite Row.php', 'status' => 'added']]);
 });
+
+/*
+|--------------------------------------------------------------------------
+| Git is never allowed to ask a question
+|--------------------------------------------------------------------------
+|
+| A fetch against an SSH remote with a passphrase-protected key stops and
+| waits for input that nobody is reading — so it sat there until the process
+| timed out and took the pairing session down with it: "Lost the studio", over
+| a credential the fetch did not even need.
+|
+*/
+
+it('tells git there is nobody to ask', function (): void {
+    $asking = (new ReflectionMethod(new LocalChanges($this->repo), 'neverAsking'))
+        ->invoke(new LocalChanges($this->repo));
+
+    expect($asking['GIT_TERMINAL_PROMPT'])->toBe('0')
+        ->and($asking['GIT_SSH_COMMAND'])->toContain('BatchMode=yes')
+        ->and($asking)->toHaveKeys(['GIT_ASKPASS', 'SSH_ASKPASS']);
+});
+
+it('carries on when a remote it cannot reach refuses it', function (): void {
+    $changes = new LocalChanges($this->repo);
+
+    (new Process(['git', 'remote', 'add', 'origin', 'git@example.invalid:nobody/nothing.git'], $this->repo))->run();
+
+    $started = microtime(true);
+
+    (new ReflectionMethod($changes, 'tryToFetch'))->invoke($changes);
+
+    expect(microtime(true) - $started)->toBeLessThan(16.0)
+        ->and($changes->isClean())->toBeTrue();
+});
