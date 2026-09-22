@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace ArtisanStudio\StudioCli;
 
+use ArtisanStudio\StudioCli\Saloon\Requests\CommandResultRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\ListProjectsRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\ListWorkflowsRequest;
+use ArtisanStudio\StudioCli\Saloon\Requests\NextCommandRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\SubmitReviewRequest;
 use ArtisanStudio\StudioCli\Saloon\StudioConnector;
 use Closure;
@@ -69,6 +71,26 @@ class Studio
     {
         return $this->connector()
             ->send(new SubmitReviewRequest($this->project(), $workflow, $review))
+            ->successful();
+    }
+
+    /**
+     * The next thing the artisans need this machine to answer, if any.
+     *
+     * @return array{id: int, name: string, arguments: array<string, mixed>, workflow: string}|null
+     */
+    public function nextCommand(): ?array
+    {
+        $response = $this->connector()->send(new NextCommandRequest($this->project()));
+
+        return $response->successful() ? $response->json('command') : null;
+    }
+
+    /** @param  array{output: string, exit_code: int, error: ?string}  $result */
+    public function answerCommand(int $command, array $result): bool
+    {
+        return $this->connector()
+            ->send(new CommandResultRequest($this->project(), $command, $result))
             ->successful();
     }
 

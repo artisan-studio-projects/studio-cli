@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ArtisanStudio\StudioCli\Console;
 
+use ArtisanStudio\StudioCli\Errand;
 use ArtisanStudio\StudioCli\LocalChanges;
 use ArtisanStudio\StudioCli\Presence;
 use ArtisanStudio\StudioCli\Studio;
@@ -40,7 +41,7 @@ class ReviewCommand extends Command
 
     protected bool $keepWatching = true;
 
-    public function handle(Studio $studio, Workspace $workspace, LocalChanges $changes, Presence $sami): int
+    public function handle(Studio $studio, Workspace $workspace, LocalChanges $changes, Errand $errands, Presence $sami): int
     {
         if (! $studio->isLinked()) {
             $this->components->warn('This project is not connected to Artisan Studio yet.');
@@ -59,17 +60,21 @@ class ReviewCommand extends Command
 
         $this->components->info('Pairing with Artisan Studio. You will be asked as each artisan finishes.');
 
-        return $this->follow($studio, $changes, $sami);
+        return $this->follow($studio, $changes, $errands, $sami);
     }
 
-    private function follow(Studio $studio, LocalChanges $changes, Presence $sami): int
+    private function follow(Studio $studio, LocalChanges $changes, Errand $errands, Presence $sami): int
     {
         $wait = max(1, (int) config('studio-cli.watch.reconnect_seconds', 5));
         $ceiling = max($wait, (int) config('studio-cli.watch.max_reconnect_seconds', 60));
 
         while ($this->keepWatching) {
             try {
-                $studio->stream(function (array $event) use ($studio, $changes, $sami): void {
+                $this->runWhateverIsWaiting($studio, $errands);
+
+                $studio->stream(function (array $event) use ($studio, $changes, $errands, $sami): void {
+                    $this->runWhateverIsWaiting($studio, $errands);
+
                     if (($event['type'] ?? '') !== 'checkpoint') {
                         return;
                     }
@@ -94,6 +99,32 @@ class ReviewCommand extends Command
         }
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Answer whatever the artisans are blocked on.
+     *
+     * ★ MASON AND PROVER CANNOT SEE THIS MACHINE. Their questions — what the
+     * schema looks like, whether the suite passes — need a running application,
+     * and on a developer's build the running application is this one. An
+     * artisan is stopped while its question is unanswered, so this runs before
+     * the stream is opened and again on every event rather than on a timer.
+     *
+     * Everything is taken one at a time and answered in order; the studio marks
+     * each taken as it hands it over, so a second terminal watching the same
+     * project picks up different work rather than the same work twice.
+     */
+    private function runWhateverIsWaiting(Studio $studio, Errand $errands): void
+    {
+        while (($waiting = $studio->nextCommand()) !== null) {
+            $name = (string) ($waiting['name'] ?? '');
+
+            $this->line(sprintf('  <fg=gray>%s</> <fg=cyan>%s</>', date('H:i:s'), $name));
+
+            $answer = $errands->run($name, (array) ($waiting['arguments'] ?? []));
+
+            $studio->answerCommand((int) $waiting['id'], $answer);
+        }
     }
 
     /** @param  array<string, mixed>  $event */

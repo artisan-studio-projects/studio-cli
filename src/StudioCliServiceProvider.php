@@ -22,6 +22,8 @@ class StudioCliServiceProvider extends ServiceProvider
         $this->app->singleton(Workspace::class, fn (): Workspace => new Workspace($this->app->basePath()));
 
         $this->app->singleton(LocalChanges::class, fn (): LocalChanges => new LocalChanges($this->app->basePath()));
+
+        $this->app->singleton(Errand::class, fn (): Errand => new Errand($this->app->basePath()));
     }
 
     public function boot(): void
