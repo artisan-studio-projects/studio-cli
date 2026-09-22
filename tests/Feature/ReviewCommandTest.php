@@ -97,11 +97,14 @@ it('writes the review as a conventional commit in the build\'s own scope', funct
     $message = (new ReflectionMethod(ReviewCommand::class, 'commitMessage'))->invoke(
         app(ReviewCommand::class),
         ['agent' => 'pixel'],
-        "Livewire component missing so app shell never rendered\nAdded MetricsDashboard and routed to it.",
+        "Route should have pointed to livewire component not directly view without any shell\nAlso fixed import namespace",
         'project-metrics-dashboard',
     );
 
-    expect($message)->toStartWith('fix(project-metrics-dashboard): livewire component missing so app shell never rendered')
-        ->and($message)->toContain('Reviewed after @pixel.')
-        ->and($message)->toContain('Added MetricsDashboard and routed to it.');
+    expect($message)->toBe(
+        "fix(project-metrics-dashboard): developer review of @pixel's work\n\n"
+        ."Reason for change:\n"
+        ."Route should have pointed to livewire component not directly view without any shell\n"
+        .'Also fixed import namespace',
+    );
 });

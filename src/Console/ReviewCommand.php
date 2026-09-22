@@ -535,17 +535,24 @@ class ReviewCommand extends Command
     }
 
     /** @param  array<string, mixed>  $event */
+    /**
+     * A commit that says what it is, with the developer's reason under it.
+     *
+     * ★ THE REASON IS NOT THE SUBJECT. The note answers "why did you change
+     * it" — feedback on the artisan's work — and its first line was being made
+     * the commit title, so history read "fix: there is no need to condition the
+     * env." The subject names the review, and names the artisan's work rather
+     * than one task: a slice can carry several commits, and no single task
+     * title covers them.
+     */
     private function commitMessage(array $event, string $note, ?string $scope): string
     {
         $agent = (string) ($event['agent'] ?? 'artisan');
-        $lines = explode("\n", trim($note));
-        $subject = trim(array_shift($lines)) ?: 'changes after the '.$agent.' checkpoint';
         $type = $scope === null ? 'fix' : 'fix('.$scope.')';
-        $rest = trim(implode("\n", $lines));
+        $reason = trim($note);
 
-        return $type.': '.lcfirst($subject)
-            ."\n\nReviewed after @".$agent.'.'
-            .($rest === '' ? '' : "\n\n".$rest);
+        return $type.': developer review of @'.$agent.'\'s work'
+            .($reason === '' ? '' : "\n\nReason for change:\n".$reason);
     }
 
     /**
