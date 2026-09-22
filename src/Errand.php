@@ -58,6 +58,12 @@ class Errand
      */
     private function whatThatMeans(string $name, array $arguments): ?array
     {
+        $raw = trim((string) ($arguments['raw'] ?? ''));
+
+        if ($raw !== '' && $this->isOneOfBoostsReadTools($raw)) {
+            return ['sh', '-c', $raw];
+        }
+
         return match ($name) {
             'describe_schema' => ['php', 'artisan', 'db:show', '--counts'],
             'query_database' => $this->aReadOnlyQuery($arguments),
@@ -65,6 +71,63 @@ class Errand
             'read_errors' => ['php', 'artisan', 'pail', '--timeout=1'],
             default => null,
         };
+    }
+
+    /**
+     * Whether a raw command is one of Boost's read-only MCP tools.
+     *
+     * ★ THE ARTISANS ALREADY SPEAK PRECISELY. Mason asks for a schema by
+     * invoking `Laravel\Boost\Mcp\Tools\DatabaseSchema` with a filter — far
+     * more exact than any four-word vocabulary invented for it, and the same
+     * call it makes against a Cloud sandbox. Rewriting that into `db:show`
+     * throws away the filter and answers a different question.
+     *
+     * So the command is run as sent — but ONLY when it is one of the two tools
+     * that read. An allow-list of exact class names, checked on the whole
+     * string: nothing else is executed, and a command carrying a second
+     * statement fails the match rather than being split and partly trusted.
+     */
+    private function isOneOfBoostsReadTools(string $raw): bool
+    {
+        if (! str_starts_with($raw, 'php artisan tinker --execute ')) {
+            return false;
+        }
+
+        $flattened = str_replace('\\', '', $raw);
+
+        $namesATool = str_contains($flattened, 'BoostMcpToolsDatabaseSchema')
+            || str_contains($flattened, 'BoostMcpToolsDatabaseQuery');
+
+        return $namesATool && ! $this->smugglesAWrite($raw);
+    }
+
+    /**
+     * Whether a read command carries something that writes alongside it.
+     *
+     * Checked on the whole string rather than by splitting it: a command with a
+     * second statement fails outright instead of being parsed into parts, some
+     * of which get trusted.
+     *
+     * ★ `--execute` IS NOT `exec(`. Matching the bare word refused every
+     * command this is meant to allow, because `php artisan tinker --execute`
+     * contains it — a list that rejects its own happy path is worse than no
+     * list, since it looks like a security check and behaves like an outage.
+     * The flag is dropped before the scan, and the dangerous names carry their
+     * opening bracket.
+     */
+    private function smugglesAWrite(string $raw): bool
+    {
+        $body = str_replace('--execute', '', $raw);
+
+        foreach (['unlink(', 'exec(', 'shell_exec(', 'system(', 'passthru(', 'proc_open(',
+            'file_put_contents(', 'DB::statement', '->delete(', '->update(', '->save(',
+            'drop ', 'truncate', 'migrate', '&&', '||', ';rm', '| sh', '`'] as $danger) {
+            if (stripos($body, $danger) !== false) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
