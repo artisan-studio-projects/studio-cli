@@ -13,7 +13,6 @@ use Illuminate\Console\Command;
 use Throwable;
 
 use function Laravel\Prompts\multiselect;
-use function Laravel\Prompts\select;
 use function Laravel\Prompts\textarea;
 
 /**
@@ -127,7 +126,17 @@ class ReviewCommand extends Command
         }
     }
 
-    /** @param  array<string, mixed>  $event */
+    /**
+     * Take over, because somebody already chose to.
+     *
+     * ★ THE DECISION IS NOT MADE HERE. The studio asks whether to review or to
+     * carry on, and a terminal that asked again would be a second prompt for a
+     * question already answered — and a chance to answer it differently. This
+     * beat only ever arrives because Review was pressed, so the only thing left
+     * to do is get out of the way and let somebody work.
+     *
+     * @param  array<string, mixed>  $event
+     */
     private function offerToStepIn(Studio $studio, LocalChanges $changes, array $event): void
     {
         $agent = (string) ($event['agent'] ?? 'an artisan');
@@ -135,22 +144,7 @@ class ReviewCommand extends Command
         $branch = (string) ($meta['branch'] ?? '');
 
         $this->newLine();
-        $this->components->info(ucfirst($agent).' has finished.');
-
-        $answer = select(
-            label: 'What would you like to do?',
-            options: [
-                'continue' => 'Happy with this — carry on',
-                'step-in' => 'Step in and change something',
-            ],
-            default: 'continue',
-        );
-
-        if ($answer === 'continue') {
-            $this->handBack($studio, $event, ['outcome' => 'accepted']);
-
-            return;
-        }
+        $this->components->info(ucfirst($agent).' has finished — you asked to review it.');
 
         $this->stepIn($studio, $changes, $event, $branch);
     }
@@ -235,7 +229,7 @@ class ReviewCommand extends Command
         if (! $changes->isClean()) {
             $this->components->error('You have uncommitted changes, so I have not switched branches.');
             $this->components->bulletList([
-                'Commit or stash them, then step in again.',
+                'Commit or stash them, then press Review again in the studio.',
                 'The build is still waiting — nothing has been lost.',
             ]);
 
