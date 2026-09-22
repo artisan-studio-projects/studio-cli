@@ -12,6 +12,7 @@ use ArtisanStudio\StudioCli\Workspace;
 use Illuminate\Console\Command;
 use Throwable;
 
+use function Laravel\Prompts\confirm;
 use function Laravel\Prompts\multiselect;
 use function Laravel\Prompts\textarea;
 
@@ -152,7 +153,7 @@ class ReviewCommand extends Command
     /** @param  array<string, mixed>  $event */
     private function stepIn(Studio $studio, LocalChanges $changes, array $event, string $branch): void
     {
-        if (! $this->readyTheBranch($changes, $branch)) {
+        if (! $this->readyTheBranch($changes, $branch, $this->whatIsBeingReviewed($event))) {
             return;
         }
 
@@ -214,7 +215,7 @@ class ReviewCommand extends Command
      * uncommitted work onto somebody else's branch is how a change ends up in a
      * commit nobody meant to make.
      */
-    private function readyTheBranch(LocalChanges $changes, string $branch): bool
+    private function readyTheBranch(LocalChanges $changes, string $branch, string $what): bool
     {
         if ($branch === '') {
             $this->components->warn('This build has no branch yet, so there is nothing to check out.');
@@ -226,17 +227,15 @@ class ReviewCommand extends Command
             return true;
         }
 
-        if (! $changes->isClean()) {
-            $this->components->error('You have uncommitted changes, so I have not switched branches.');
-            $this->components->bulletList([
-                'Commit or stash them, then press Review again in the studio.',
-                'The build is still waiting — nothing has been lost.',
-            ]);
-
+        if (! $this->waitUntilTheTreeIsClean($changes)) {
             return false;
         }
 
-        $this->components->info('Switching you to '.$branch.'.');
+        if (! $this->mayISwitch($branch, $what)) {
+            $this->components->info('Left where you are. The build is still waiting.');
+
+            return false;
+        }
 
         if (! $changes->switchTo($branch)) {
             $this->components->error('Could not check out '.$branch.'. The build is still waiting.');
@@ -247,6 +246,71 @@ class ReviewCommand extends Command
         $changes->catchUp();
 
         return true;
+    }
+
+    /**
+     * What this checkpoint is, in the words somebody would use for it.
+     *
+     * @param  array<string, mixed>  $event
+     */
+    private function whatIsBeingReviewed(array $event): string
+    {
+        $agent = ucfirst((string) ($event['agent'] ?? 'this artisan'));
+        $meta = (array) ($event['meta'] ?? []);
+        $build = trim((string) ($meta['workflow_name'] ?? ''));
+
+        return $build === ''
+            ? $agent."'s checkpoint"
+            : $agent."'s checkpoint on ".$build;
+    }
+
+    /**
+     * Wait for the working tree, rather than sending somebody back to a browser.
+     *
+     * ★ A DEAD END IS NOT AN ANSWER. Refusing over uncommitted work and asking
+     * for Review to be pressed again means leaving the terminal, finding the
+     * tab, and clicking a button to be told the same thing — when the only
+     * thing that has to change is right here. So it says what is in the way and
+     * keeps looking, and the moment the tree is clean it carries on by itself.
+     */
+    private function waitUntilTheTreeIsClean(LocalChanges $changes): bool
+    {
+        if ($changes->isClean()) {
+            return true;
+        }
+
+        $this->components->warn('You have uncommitted changes, so I cannot switch branches yet.');
+        $this->line('  <fg=gray>commit or stash them and I will carry on — ctrl-c to leave it</>');
+
+        while (! $changes->isClean()) {
+            if ($this->pressedEnter()) {
+                $this->line('  <fg=gray>still not clean — checking again</>');
+            }
+
+            sleep($this->pollSeconds());
+        }
+
+        $this->newLine();
+        $this->components->info('Clean now.');
+
+        return true;
+    }
+
+    /**
+     * Ask before moving somebody off the branch they are standing on.
+     *
+     * Even a clean tree is somebody's place of work, and a checkout that
+     * happens unannounced is a surprise in an editor that has just reloaded
+     * every open file.
+     */
+    private function mayISwitch(string $branch, string $what): bool
+    {
+        return confirm(
+            label: 'Switch to '.$branch.' to review '.$what.'?',
+            default: true,
+            yes: 'Switch and review',
+            no: 'Leave me here',
+        );
     }
 
     /**
