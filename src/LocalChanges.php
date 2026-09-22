@@ -89,6 +89,57 @@ class LocalChanges
         return $this->currentBranch() === $branch;
     }
 
+    /**
+     * What the artisan actually built on this branch, against where the
+     * developer switched from.
+     *
+     * ★ SWITCHING SOMEBODY ONTO A BRANCH IS NOT SHOWING THEM WHAT IS ON IT.
+     * The artisan's work already arrived as real commits before the developer
+     * ever gets here — `sinceTheLastCommit()` only sees THEIR OWN edits after
+     * that point, so "nothing changed yet" was true and useless: it answered
+     * a question nobody asked while staying silent about the one that
+     * mattered. A developer reviewing a checkpoint needs to see the artisan's
+     * commits first, not be told to start editing blind.
+     *
+     * @return list<array{path: string, status: string}>
+     */
+    public function whatLandedSince(string $priorBranch): array
+    {
+        $range = $priorBranch.'...HEAD';
+        $lines = array_filter(explode("\n", $this->git(['diff', '--name-status', $range])));
+
+        return array_values(array_filter(array_map(
+            fn (string $line): ?array => $this->readNameStatusLine($line),
+            $lines,
+        )));
+    }
+
+    /** The commit messages the artisan landed on this branch, newest first. */
+    public function commitsSince(string $priorBranch): string
+    {
+        return trim($this->git(['log', '--oneline', $priorBranch.'..HEAD']));
+    }
+
+    /** One `git diff --name-status` line as a path and what happened to it. */
+    private function readNameStatusLine(string $line): ?array
+    {
+        $parts = preg_split('/\t+/', trim($line));
+
+        if (count($parts) < 2) {
+            return null;
+        }
+
+        [$code, $path] = $parts;
+        $path = end($parts);
+
+        return ['path' => $path, 'status' => match (true) {
+            str_starts_with($code, 'A') => 'added',
+            str_starts_with($code, 'D') => 'deleted',
+            str_starts_with($code, 'R') => 'renamed',
+            default => 'modified',
+        }];
+    }
+
     /** Bring the branch up to date, without ever merging over local work. */
     public function catchUp(): void
     {

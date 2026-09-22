@@ -153,9 +153,13 @@ class ReviewCommand extends Command
     /** @param  array<string, mixed>  $event */
     private function stepIn(Studio $studio, LocalChanges $changes, array $event, string $branch): void
     {
+        $priorBranch = $changes->currentBranch();
+
         if (! $this->readyTheBranch($studio, $changes, $event, $branch)) {
             return;
         }
+
+        $this->showWhatTheArtisanBuilt($changes, $priorBranch, $branch);
 
         $this->components->info('Ready. Edit what you need — I will check every '.$this->pollSeconds().'s.');
 
@@ -249,6 +253,43 @@ class ReviewCommand extends Command
         $changes->catchUp();
 
         return true;
+    }
+
+    /**
+     * Show what the artisan actually committed, before asking for edits.
+     *
+     * Landing somebody on a branch is not the same as showing them what is on
+     * it — their own tree has nothing to diff against yet, so "nothing changed
+     * yet" was accurate and useless: the one thing worth seeing at a
+     * checkpoint is what the artisan built, and until now nothing here ever
+     * showed it.
+     */
+    private function showWhatTheArtisanBuilt(LocalChanges $changes, string $priorBranch, string $branch): void
+    {
+        if ($priorBranch === $branch) {
+            return;
+        }
+
+        $files = $changes->whatLandedSince($priorBranch);
+        $commits = $changes->commitsSince($priorBranch);
+
+        $this->newLine();
+        $this->components->twoColumnDetail('<fg=cyan>What landed on this branch</>', '');
+
+        if ($commits !== '') {
+            foreach (explode("\n", $commits) as $line) {
+                $this->line('  <fg=gray>'.$line.'</>');
+            }
+            $this->newLine();
+        }
+
+        if ($files === []) {
+            $this->line('  <fg=gray>no file changes found against '.$priorBranch.'</>');
+
+            return;
+        }
+
+        $this->renderChanged($files, showPrompt: false);
     }
 
     /**
@@ -365,13 +406,16 @@ class ReviewCommand extends Command
     }
 
     /** @param  list<array{path: string, status: string}>  $files */
-    private function renderChanged(array $files): void
+    private function renderChanged(array $files, bool $showPrompt = true): void
     {
         $this->newLine();
 
         if ($files === []) {
             $this->line('  <fg=gray>nothing changed yet</>');
-            $this->line('  <fg=gray>press enter when you are done</>');
+
+            if ($showPrompt) {
+                $this->line('  <fg=gray>press enter when you are done</>');
+            }
 
             return;
         }
@@ -382,6 +426,7 @@ class ReviewCommand extends Command
                 match ($file['status']) {
                     'added' => 'green',
                     'deleted' => 'red',
+                    'renamed' => 'blue',
                     default => 'yellow',
                 },
                 str_pad($file['status'], 9),
@@ -389,7 +434,9 @@ class ReviewCommand extends Command
             ));
         }
 
-        $this->line('  <fg=gray>press enter when you are done</>');
+        if ($showPrompt) {
+            $this->line('  <fg=gray>press enter when you are done</>');
+        }
     }
 
     /**
