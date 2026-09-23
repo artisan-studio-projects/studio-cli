@@ -224,10 +224,19 @@ class LocalChanges
         return $contents === '' ? 0 : substr_count(rtrim($contents, "\n"), "\n") + 1;
     }
 
-    /** Bring the branch up to date, without ever merging over local work. */
-    public function catchUp(): void
+    /**
+     * Bring the branch up to date, without ever merging over local work.
+     *
+     * ★ FETCHED WITH THE STUDIO'S CREDENTIAL, LIKE A SWITCH. A plain `pull`
+     * from `origin` failed without a word on a passphrase-protected key, so a
+     * developer already on the branch reviewed the previous artisan's work
+     * while the one they were asked about sat one commit ahead on GitHub.
+     */
+    public function catchUp(?string $remote = null): void
     {
-        $this->git(['pull', '--ff-only', '--quiet'], timeout: 20);
+        $this->tryToFetch($remote);
+
+        $this->git(['merge', '--ff-only', '--quiet', 'origin/'.$this->currentBranch()], timeout: 20);
     }
 
     /**

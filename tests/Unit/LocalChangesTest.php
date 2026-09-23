@@ -165,3 +165,29 @@ it('reads the scope the build commits under', function (): void {
 
     expect((new LocalChanges($this->repo))->scopeOfTheLastCommit())->toBe('project-metrics-dashboard');
 });
+
+it('catches up with the artisan\'s newest commit on the branch it is already on', function (): void {
+    $remote = $this->repo.'-remote.git';
+    (new Process(['git', 'init', '--bare', '--quiet', $remote]))->run();
+    (new Process(['git', 'checkout', '--quiet', '-b', 'sami/sandbox-metrics'], $this->repo))->run();
+    (new Process(['git', 'push', '--quiet', $remote, 'sami/sandbox-metrics'], $this->repo))->run();
+
+    $studio = $this->repo.'-studio';
+    (new Process(['git', 'clone', '--quiet', '--branch', 'sami/sandbox-metrics', $remote, $studio]))->run();
+    (new Process(['git', 'config', 'user.email', 'spark@artisan.test'], $studio))->run();
+    (new Process(['git', 'config', 'user.name', 'Spark'], $studio))->run();
+    file_put_contents($studio.'/app/Livewire/Invites.php', '<?php // spark wired this');
+    commitEverythingIn($studio, 'feat(metrics): @spark created the chart behaviour');
+    (new Process(['git', 'push', '--quiet', 'origin', 'sami/sandbox-metrics'], $studio))->run();
+
+    (new Process(['git', 'remote', 'add', 'origin', 'git@example.invalid:nobody/nothing.git'], $this->repo))->run();
+
+    (new LocalChanges($this->repo))->catchUp($remote);
+
+    $head = new Process(['git', 'log', '-1', '--format=%s'], $this->repo);
+    $head->run();
+
+    exec('rm -rf '.escapeshellarg($remote).' '.escapeshellarg($studio));
+
+    expect(trim($head->getOutput()))->toBe('feat(metrics): @spark created the chart behaviour');
+});

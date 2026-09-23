@@ -235,7 +235,7 @@ class ReviewCommand extends Command
         }
 
         if ($changes->currentBranch() === $branch) {
-            $changes->catchUp();
+            $changes->catchUp($this->whereToFetchFrom($studio, $event));
 
             return true;
         }
@@ -256,7 +256,7 @@ class ReviewCommand extends Command
             return false;
         }
 
-        $changes->catchUp();
+        $changes->catchUp($this->whereToFetchFrom($studio, $event));
 
         return true;
     }
