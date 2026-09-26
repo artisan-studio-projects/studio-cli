@@ -119,7 +119,7 @@ class ReviewCommand extends Command
         while (($waiting = $studio->nextCommand()) !== null) {
             $name = (string) ($waiting['name'] ?? '');
 
-            $this->line(sprintf('  <fg=gray>%s</> <fg=cyan>%s</>', date('H:i:s'), $name));
+            $this->line(sprintf('  <fg=gray>%s</> %s <fg=gray>(%s)</>', date('H:i:s'), $this->whatWasAsked($name), $name));
 
             $answer = $errands->run($name, (array) ($waiting['arguments'] ?? []));
 
@@ -296,6 +296,37 @@ class ReviewCommand extends Command
         }
 
         $this->renderChanged($files);
+        $this->remindToMigrate($files);
+    }
+
+    /** @param  list<array{path: string, status: string}>  $files */
+    private function remindToMigrate(array $files): void
+    {
+        $migrations = count(array_filter(
+            $files,
+            fn (array $file): bool => str_starts_with($file['path'], 'database/migrations/') && $file['status'] !== 'deleted',
+        ));
+
+        if ($migrations === 0) {
+            return;
+        }
+
+        $this->components->warn(sprintf(
+            '%d %s landed. Run <options=bold>php artisan migrate</> before you try it.',
+            $migrations,
+            $migrations === 1 ? 'migration' : 'migrations',
+        ));
+    }
+
+    private function whatWasAsked(string $errand): string
+    {
+        return match ($errand) {
+            'describe_schema' => 'An artisan read your database schema',
+            'query_database' => 'An artisan looked something up in your database (read-only)',
+            'run_tests' => 'An artisan ran its tests on your machine',
+            'read_errors' => 'An artisan read your app\'s recent errors',
+            default => 'An artisan asked your app something',
+        };
     }
 
     /**

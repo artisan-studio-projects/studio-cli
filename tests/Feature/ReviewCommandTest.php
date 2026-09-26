@@ -6,6 +6,7 @@ use ArtisanStudio\StudioCli\Console\ReviewCommand;
 use ArtisanStudio\StudioCli\Saloon\Requests\SubmitReviewRequest;
 use ArtisanStudio\StudioCli\Studio;
 use Illuminate\Console\OutputStyle;
+use Illuminate\Console\View\Components\Factory;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Laravel\Facades\Saloon;
 use Symfony\Component\Console\Input\ArrayInput;
@@ -107,4 +108,35 @@ it('writes the review as a conventional commit in the build\'s own scope', funct
         ."Route should have pointed to livewire component not directly view without any shell\n"
         .'Also fixed import namespace',
     );
+});
+
+it('reminds the developer to migrate when the artisan\'s commits brought migrations', function (): void {
+    $buffer = new BufferedOutput;
+    $command = app(ReviewCommand::class);
+    $command->setOutput(new OutputStyle(new ArrayInput([]), $buffer));
+
+    (new ReflectionProperty($command, 'components'))->setValue($command, new Factory($command->getOutput()));
+
+    $remind = new ReflectionMethod($command, 'remindToMigrate');
+
+    $remind->invoke($command, [
+        ['path' => 'database/migrations/2026_09_24_000001_create_metric_snapshots_table.php', 'status' => 'added'],
+        ['path' => 'database/migrations/2026_09_24_000002_add_phase_to_tasks_table.php', 'status' => 'added'],
+        ['path' => 'app/Models/MetricSnapshot.php', 'status' => 'added'],
+    ]);
+
+    expect($buffer->fetch())->toContain('2 migrations landed')->toContain('php artisan migrate');
+
+    $remind->invoke($command, [['path' => 'app/Models/MetricSnapshot.php', 'status' => 'added']]);
+
+    expect($buffer->fetch())->not->toContain('migrate');
+});
+
+it('says in plain words what an artisan asked the developer\'s machine', function (): void {
+    $command = app(ReviewCommand::class);
+    $said = new ReflectionMethod($command, 'whatWasAsked');
+
+    expect($said->invoke($command, 'query_database'))->toContain('looked something up in your database')
+        ->and($said->invoke($command, 'describe_schema'))->toContain('database schema')
+        ->and($said->invoke($command, 'something_new'))->toBe('An artisan asked your app something');
 });
