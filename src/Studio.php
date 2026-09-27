@@ -15,6 +15,7 @@ use ArtisanStudio\StudioCli\Saloon\Requests\ShowSnapshotRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\ShowWorkflowRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\StartTaskReviewRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\SubmitReviewRequest;
+use ArtisanStudio\StudioCli\Saloon\Requests\SubmitTestRunRequest;
 use ArtisanStudio\StudioCli\Saloon\StudioConnector;
 use Closure;
 use RuntimeException;
@@ -90,6 +91,15 @@ class Studio
     public function finishTaskReview(string $workflow, string $task, array $review): ?array
     {
         return $this->fetch(new FinishTaskReviewRequest($this->project(), $workflow, $task, $review));
+    }
+
+    /**
+     * @param  array{passed: bool, output: string, results: list<array{file: string, passed: bool, summary: ?string}>, cases: array{passed: int, failed: int}}  $run
+     * @return array<mixed>|null
+     */
+    public function submitTestRun(string $workflow, string $task, array $run): ?array
+    {
+        return $this->fetch(new SubmitTestRunRequest($this->project(), $workflow, $task, $run));
     }
 
     /**

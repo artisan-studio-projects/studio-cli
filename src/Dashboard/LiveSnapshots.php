@@ -13,7 +13,7 @@ final class LiveSnapshots implements SnapshotSource
     private int $snapshotAt = 0;
 
     /**
-     * @var array<string, array{at: int, workflow: array{id: string, name: string, status: string, branch: ?string, url: ?string, tasks: list<array{id: string, ordinal: int, title: string, artisan: string, status: string, summary: string, files: list<array{path: string, kind: string}>}>}|null}>
+     * @var array<string, array{at: int, workflow: array{id: string, name: string, status: string, branch: ?string, url: ?string, tasks: list<array{id: string, ordinal: int, title: string, artisan: string, status: string, summary: string, files: list<array{path: string, kind: string}>, tests: array{state: string, files: list<string>}|null}>}|null}>
      */
     private array $workflows = [];
 

@@ -171,7 +171,7 @@ readonly class DashboardSnapshot
     }
 
     /**
-     * @return array{id: string, name: string, status: string, branch: ?string, url: ?string, tasks: list<array{id: string, ordinal: int, title: string, artisan: string, status: string, summary: string, files: list<array{path: string, kind: string}>}>}|null
+     * @return array{id: string, name: string, status: string, branch: ?string, url: ?string, tasks: list<array{id: string, ordinal: int, title: string, artisan: string, status: string, summary: string, files: list<array{path: string, kind: string}>, tests: array{state: string, files: list<string>}|null}>}|null
      */
     public function sampleWorkflow(string $id): ?array
     {
@@ -201,6 +201,7 @@ readonly class DashboardSnapshot
                 'status' => $statuses[$index],
                 'summary' => $task[2],
                 'files' => array_map(fn (string $path): array => ['path' => $path, 'kind' => 'write'], $task[3]),
+                'tests' => null,
             ], [
                 ['Model, migration and factory', 'Mason', 'Where the numbers are kept, and a factory to make them in tests.', ['app/Models/HealthTrend.php', 'database/migrations/2026_09_26_000000_create_health_trends_table.php']],
                 ['The page and its components', 'Pixel', 'The health trends card and the page it sits on.', ['resources/views/components/health-card.blade.php', 'resources/views/insights/trends.blade.php']],
@@ -212,7 +213,7 @@ readonly class DashboardSnapshot
 
     /**
      * @param  array<mixed>  $data
-     * @return array{id: string, name: string, status: string, branch: ?string, url: ?string, tasks: list<array{id: string, ordinal: int, title: string, artisan: string, status: string, summary: string, files: list<array{path: string, kind: string}>}>}
+     * @return array{id: string, name: string, status: string, branch: ?string, url: ?string, tasks: list<array{id: string, ordinal: int, title: string, artisan: string, status: string, summary: string, files: list<array{path: string, kind: string}>, tests: array{state: string, files: list<string>}|null}>}
      */
     public static function workflowFromApi(array $data): array
     {
@@ -241,6 +242,10 @@ readonly class DashboardSnapshot
                         fn (array $file): array => ['path' => (string) ($file['path'] ?? ''), 'kind' => (string) ($file['kind'] ?? '')],
                         array_filter((array) ($task['files'] ?? []), fn (mixed $file): bool => is_array($file) && ($file['kind'] ?? '') !== 'read'),
                     )),
+                    'tests' => is_array($task['tests'] ?? null) ? [
+                        'state' => (string) ($task['tests']['state'] ?? ''),
+                        'files' => array_values(array_filter((array) ($task['tests']['files'] ?? []), is_string(...))),
+                    ] : null,
                 ])
                 ->all()),
         ];

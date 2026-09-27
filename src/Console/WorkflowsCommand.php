@@ -23,6 +23,7 @@ use ArtisanStudio\StudioCli\Terminal\Contracts\ProvidesTab;
 use ArtisanStudio\StudioCli\Terminal\Contracts\RunsInBackground;
 use ArtisanStudio\StudioCli\Terminal\ScreenRequests;
 use ArtisanStudio\StudioCli\Terminal\Tab;
+use ArtisanStudio\StudioCli\TestRun;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Event;
 
@@ -63,6 +64,11 @@ class WorkflowsCommand extends Command implements ProvidesTab, RunsInBackground
      * @var array<string, TaskReview>
      */
     private array $reviews = [];
+
+    /**
+     * @var array<string, TestRun>
+     */
+    private array $testRuns = [];
 
     protected $description = 'Open Artisan Studio on the Workflows tab';
 
@@ -123,7 +129,7 @@ class WorkflowsCommand extends Command implements ProvidesTab, RunsInBackground
                     Text::make(fn (array $task): string => in_array($task['status'], [...self::REVIEWABLE, DashboardSnapshot::CHECKPOINT], true) ? '' : ($task['workflow']['name'] ?? '')." · task {$task['ordinal']} · {$task['artisan']}")
                         ->colour('dim')
                         ->wrap(),
-                    Text::make(fn (array $task): string => match ($task['status']) {
+                    Text::make(fn (array $task): string => ($task['tests'] ?? null) !== null ? $this->testsLine($task) : match ($task['status']) {
                         DashboardSnapshot::WAITING_FOR_YOU => "{$task['artisan']} has finished and is waiting for your review.\n".app(BranchStatus::class)->beforeReviewing($task['workflow']['branch'] ?? null),
                         DashboardSnapshot::IN_REVIEW => 'You are reviewing this. Your edits show in the review as you make them.',
                         DashboardSnapshot::FINISHED => "{$task['artisan']} finished this. The checkpoint comes once {$task['artisan']}'s other tasks are done.",
@@ -153,7 +159,11 @@ class WorkflowsCommand extends Command implements ProvidesTab, RunsInBackground
                     Text::make('Esc goes back to the tasks')->colour('dim'),
                 ],
             )
-            ->enters(fn (array $task): array => $this->canReview($task) ? [$this->reviewOf($task)->panel()] : []);
+            ->enters(fn (array $task): array => match (true) {
+                $this->canRunTests($task) => [$this->testRunOf($task)->panel()],
+                $this->canReview($task) => [$this->reviewOf($task)->panel()],
+                default => [],
+            });
     }
 
     public function start(): void
@@ -169,6 +179,8 @@ class WorkflowsCommand extends Command implements ProvidesTab, RunsInBackground
     public function tick(): void
     {
         $this->answerArtisans();
+
+        collect($this->testRuns)->each(fn (TestRun $run) => $run->tick());
     }
 
     public function stop(): void
@@ -220,7 +232,8 @@ class WorkflowsCommand extends Command implements ProvidesTab, RunsInBackground
      */
     private function canReview(array $task): bool
     {
-        return in_array($task['status'], self::REVIEWABLE, true)
+        return ($task['tests'] ?? null) === null
+            && in_array($task['status'], self::REVIEWABLE, true)
             && ! app(SnapshotSource::class) instanceof SampleSnapshots
             && ! $this->cannotStart($task)
             && $this->reviewOf($task)->isOpen();
@@ -243,6 +256,7 @@ class WorkflowsCommand extends Command implements ProvidesTab, RunsInBackground
     private function reviewButton(array $task): string
     {
         return match (true) {
+            $this->canRunTests($task) => '⏎ Run tests',
             ! $this->canReview($task) => '',
             $task['status'] === DashboardSnapshot::IN_REVIEW => '⏎ Finish review',
             default => '⏎ Start review',
@@ -258,8 +272,44 @@ class WorkflowsCommand extends Command implements ProvidesTab, RunsInBackground
     }
 
     /**
+     * @param  array<string, mixed>  $task
+     */
+    private function canRunTests(array $task): bool
+    {
+        return ($task['tests'] ?? null) !== null
+            && ! app(SnapshotSource::class) instanceof SampleSnapshots
+            && ($this->testRunOf($task)->isOpen() || ($task['status'] === DashboardSnapshot::WAITING_FOR_YOU && ! $this->cannotStart($task)));
+    }
+
+    /**
+     * @param  array<string, mixed>  $task
+     */
+    private function testRunOf(array $task): TestRun
+    {
+        return ($this->testRuns[(string) $task['id']] ??= app(TestRun::class, ['task' => $task]))->seeing($task);
+    }
+
+    /**
+     * @param  array<string, mixed>  $task
+     */
+    private function testsLine(array $task): string
+    {
+        $count = trans_choice(':count test file|:count test files', count($task['tests']['files'] ?? []));
+        $branch = (string) ($task['workflow']['branch'] ?? '');
+        $now = app(BranchStatus::class)->now();
+        $changes = trans_choice(':count uncommitted change|:count uncommitted changes', $now['uncommitted']);
+
+        return match (true) {
+            $task['status'] === DashboardSnapshot::CHECKPOINT => "Prover wrote {$count}. Choose Run in my terminal in the studio to run them here, or Skip tests to carry on.",
+            $task['status'] === DashboardSnapshot::WAITING_FOR_YOU && app(BranchStatus::class)->blocksReviewing($branch) => "Prover's {$count} are ready to run on your machine.\nYou are on {$now['branch']} with {$changes}. Commit or stash them first: running the tests switches you to {$branch}.",
+            $task['status'] === DashboardSnapshot::WAITING_FOR_YOU => "Prover's {$count} are ready to run on your machine. Press Enter to run them.",
+            default => '',
+        };
+    }
+
+    /**
      * @param  array<string, mixed>  $record
-     * @return array{id: string, name: string, status: string, branch: ?string, url: ?string, tasks: list<array{id: string, ordinal: int, title: string, artisan: string, status: string, summary: string, files: list<array{path: string, kind: string}>}>}
+     * @return array{id: string, name: string, status: string, branch: ?string, url: ?string, tasks: list<array{id: string, ordinal: int, title: string, artisan: string, status: string, summary: string, files: list<array{path: string, kind: string}>, tests: array{state: string, files: list<string>}|null}>}
      */
     private function opened(array $record, SnapshotSource $source, Focus $focus): array
     {

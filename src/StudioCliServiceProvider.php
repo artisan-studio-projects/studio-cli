@@ -40,6 +40,8 @@ class StudioCliServiceProvider extends ServiceProvider
 
         $this->app->singleton(EnvFile::class, fn (): EnvFile => new EnvFile($this->app->basePath('.env')));
 
+        $this->app->singleton(TestSuite::class, fn (): TestSuite => new TestSuite($this->app->basePath()));
+
         $this->app->singleton(ActivityLog::class);
 
         $this->app->singleton(Focus::class);
