@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ArtisanStudio\StudioCli;
 
+use ArtisanStudio\StudioCli\Console\AvatarSyncCommand;
 use ArtisanStudio\StudioCli\Console\BuildPresenceCommand;
 use ArtisanStudio\StudioCli\Console\LinkCommand;
 use ArtisanStudio\StudioCli\Console\ReviewCommand;
@@ -24,6 +25,8 @@ class StudioCliServiceProvider extends ServiceProvider
         $this->app->singleton(LocalChanges::class, fn (): LocalChanges => new LocalChanges($this->app->basePath()));
 
         $this->app->singleton(Errand::class, fn (): Errand => new Errand($this->app->basePath()));
+
+        $this->app->singleton(Presence::class);
     }
 
     public function boot(): void
@@ -33,6 +36,7 @@ class StudioCliServiceProvider extends ServiceProvider
         }
 
         $this->commands([
+            AvatarSyncCommand::class,
             BuildPresenceCommand::class,
             LinkCommand::class,
             ReviewCommand::class,

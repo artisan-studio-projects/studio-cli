@@ -4,15 +4,12 @@ declare(strict_types=1);
 
 namespace ArtisanStudio\StudioCli;
 
-use Illuminate\Support\Facades\Process;
+use ArtisanStudio\StudioCli\Concerns\HasSwiftContainer;
+use Illuminate\Container\Container;
 
 class Presence
 {
-    private mixed $process = null;
-
-    private mixed $input = null;
-
-    private mixed $output = null;
+    use HasSwiftContainer;
 
     private const string PLACEMENT = 'cli_workflow';
 
@@ -26,9 +23,7 @@ class Presence
 
     public function isAvailable(): bool
     {
-        return config('studio-cli.presence.enabled', true)
-            && PHP_OS_FAMILY === 'Darwin'
-            && is_executable($this->player());
+        return $this->containerIsAvailable();
     }
 
     public function arrive(): void
@@ -42,36 +37,13 @@ class Presence
             return;
         }
 
-        if (! $this->isUp()) {
+        if (! $this->containerIsUp()) {
             $this->dismiss();
 
             return;
         }
 
-        $this->hasFinishedSpeaking();
-    }
-
-    private function hasFinishedSpeaking(): bool
-    {
-        if (! is_resource($this->output)) {
-            return false;
-        }
-
-        return trim((string) fread($this->output, 1024)) !== '';
-    }
-
-    private function sendAwayAnyStrays(): void
-    {
-        Process::run(['pkill', '-f', $this->player()]);
-    }
-
-    private function isUp(): bool
-    {
-        if (! is_resource($this->process)) {
-            return false;
-        }
-
-        return proc_get_status($this->process)['running'];
+        $this->containerHasOutput();
     }
 
     /** @param  array<string, mixed>  $event */
@@ -82,66 +54,26 @@ class Presence
         }
 
         $kind = (string) ($event['kind'] ?? 'file');
-
         $clip = $this->clipFor($kind);
 
         if ($clip === null) {
             return;
         }
 
-        $line = $clip.($this->shouldHold($kind) ? ' --loop' : '')."\n";
-
-        if ($this->isUp()) {
-            fwrite($this->input, $line);
-
-            return;
-        }
-
-        $this->standUp($line);
+        $this->sendToContainer(['play' => $clip, 'loop' => $this->shouldHold($kind)]);
     }
 
-    private function standUp(string $line): void
+    /**
+     * @return list<string>
+     */
+    protected function containerPreload(): array
     {
-        $this->sendAwayAnyStrays();
-
-        $descriptors = [['pipe', 'r'], ['pipe', 'w'], ['file', '/dev/null', 'w']];
-
-        $process = proc_open(
-            [$this->player(), '-', (string) $this->howTallSheStands()],
-            $descriptors,
-            $pipes,
-        );
-
-        if (! is_resource($process)) {
-            return;
-        }
-
-        $this->process = $process;
-        $this->input = $pipes[0];
-        $this->output = $pipes[1];
-
-        stream_set_blocking($this->output, false);
-
-        fwrite($this->input, $line);
+        return glob($this->clipFolder().'/*.mov') ?: [];
     }
 
     public function dismiss(): void
     {
-        if (is_resource($this->input)) {
-            fclose($this->input);
-        }
-
-        if (is_resource($this->output)) {
-            fclose($this->output);
-        }
-
-        if (is_resource($this->process)) {
-            proc_close($this->process);
-        }
-
-        $this->input = null;
-        $this->output = null;
-        $this->process = null;
+        $this->closeContainer();
     }
 
     private function clipFor(string $kind): ?string
@@ -159,22 +91,13 @@ class Presence
 
     private function clipPath(string $state): ?string
     {
-        $stem = strtr($state, ['::' => '_', '_' => '-']);
-
-        $path = rtrim((string) config('studio-cli.presence.clips'), '/').'/'.$stem.'.mov';
+        $path = $this->clipFolder().'/'.AvatarClips::stem($state).'.mov';
 
         return is_file($path) ? $path : null;
     }
 
-    private function howTallSheStands(): int
+    private function clipFolder(): string
     {
-        $wanted = (int) config('studio-cli.presence.size', 360);
-
-        return max(120, min(900, $wanted));
-    }
-
-    private function player(): string
-    {
-        return (string) config('studio-cli.presence.player');
+        return Container::getInstance()->make(AvatarClips::class)->folder();
     }
 }

@@ -4,16 +4,19 @@ declare(strict_types=1);
 
 namespace ArtisanStudio\StudioCli\Console;
 
+use ArtisanStudio\StudioCli\AvatarClips;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Process;
 
 class BuildPresenceCommand extends Command
 {
-    public const string SIGNATURE = 'artisan-studio:build-presence';
+    public const string SIGNATURE = 'studio:build-avatar';
 
     protected $signature = self::SIGNATURE;
 
-    protected $description = 'Compile the desktop player that shows SAMI while a build is watched';
+    protected $aliases = ['artisan-studio:build-presence'];
+
+    protected $description = 'Compile the desktop player that shows your avatar while Artisan Studio is open';
 
     public function handle(): int
     {
@@ -45,9 +48,14 @@ class BuildPresenceCommand extends Command
             return self::FAILURE;
         }
 
-        $this->components->info('SAMI can appear now. She shows up while `artisan-studio:watch` is running.');
+        $this->components->info('Your avatar can appear now. It shows up while `php artisan studio` is open.');
+
+        if (app(AvatarClips::class)->fromTheStudio()) {
+            $this->call(AvatarSyncCommand::SIGNATURE);
+        }
+
         $this->components->bulletList([
-            'Her clips go in '.config('studio-cli.presence.clips').' — one .mov per state.',
+            'Her clips are kept in '.app(AvatarClips::class)->folder().', one .mov per state.',
             'Turn her off any time with STUDIO_CLI_PRESENCE=false.',
         ]);
 

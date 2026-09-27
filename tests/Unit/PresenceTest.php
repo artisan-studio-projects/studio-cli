@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use ArtisanStudio\StudioCli\Presence;
 use ArtisanStudio\StudioCli\Workspace;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Process;
 
 /*
@@ -36,6 +37,7 @@ beforeEach(function (): void {
     config()->set('studio-cli.presence.enabled', true);
     config()->set('studio-cli.presence.player', $this->player);
     config()->set('studio-cli.presence.clips', $this->clips);
+    config()->set('studio-cli.presence.source', 'local');
 
     $this->sami = new Presence(new Workspace(getcwd()));
 });
@@ -192,13 +194,13 @@ it('names a variant the way the studio would', function (): void {
 it('keeps her a sensible size whatever the config says', function (): void {
     config()->set('studio-cli.presence.size', 5000);
 
-    expect((fn (): int => $this->howTallSheStands())->call(test()->sami))->toBe(900);
+    expect((fn (): int => $this->containerHeight())->call(test()->sami))->toBe(900);
 });
 
 it('will not shrink her into a smudge', function (): void {
     config()->set('studio-cli.presence.size', 10);
 
-    expect((fn (): int => $this->howTallSheStands())->call(test()->sami))->toBe(120);
+    expect((fn (): int => $this->containerHeight())->call(test()->sami))->toBe(120);
 });
 
 /**
@@ -233,8 +235,8 @@ it('holds the resting clip and plays a reaction once', function (): void {
 
     $lines = array_values(array_filter(explode("\n", whatSheWasTold())));
 
-    expect($lines[0])->toEndWith('--loop')
-        ->and($lines[1])->not->toEndWith('--loop');
+    expect(json_decode($lines[0], true)['loop'])->toBeTrue()
+        ->and(json_decode($lines[1], true)['loop'])->toBeFalse();
 });
 
 /**
@@ -278,4 +280,71 @@ it('rests through a kind that has no state of its own', function (): void {
     test()->sami->react(['kind' => 'something-the-studio-added-later']);
 
     expect(whatSheWasTold())->toContain('cli-workflow_started.mov');
+});
+
+/*
+|--------------------------------------------------------------------------
+| Laravel decides, the player plays
+|--------------------------------------------------------------------------
+|
+| Everything about her window comes from config and is handed to the player
+| as JSON, so a new behaviour is a config key rather than a change in Swift.
+|
+*/
+
+it('tells the player what to play as JSON, holding the resting clip on a loop', function (): void {
+    aClipFor('cli-workflow_started');
+    aClipFor('cli-workflow_done');
+
+    test()->sami->arrive();
+    test()->sami->react(['kind' => 'done']);
+
+    $told = array_values(array_filter(explode("\n", whatSheWasTold())));
+
+    expect(json_decode($told[0], true))->toBe(['play' => test()->clips.'/cli-workflow_started.mov', 'loop' => true])
+        ->and(json_decode($told[1], true))->toBe(['play' => test()->clips.'/cli-workflow_done.mov', 'loop' => false]);
+});
+
+it('starts her where the config says, center unless told otherwise', function (?string $position, float $expected): void {
+    config()->set('studio-cli.presence.window.position', $position);
+    Cache::forget('studio-cli.presence.position');
+
+    expect((fn (): float => $this->containerPosition())->call(test()->sami))->toBe($expected);
+})->with([
+    'the default' => [null, 0.5],
+    'center' => ['center', 0.5],
+    'left' => ['left', 0.0],
+    'right' => ['right', 1.0],
+    'a percentage of the way across' => ['75%', 0.75],
+    'a percentage past the edge' => ['140%', 1.0],
+    'something it does not know' => ['somewhere', 0.5],
+]);
+
+it('remembers where she was dragged and starts her there next time, unless told to forget', function (): void {
+    config()->set('studio-cli.presence.window.position', 'left');
+    $heard = fn (string $line): array => (fn (): array => $this->containerHeardThat($line))->call(test()->sami);
+    $position = fn (): float => (fn (): float => $this->containerPosition())->call(test()->sami);
+
+    $heard('{"moved":0.42}');
+    $remembered = $position();
+
+    config()->set('studio-cli.presence.window.remember_where_dragged', false);
+    $heard('{"moved":0.9}');
+
+    expect($remembered)->toBe(0.42)
+        ->and($position())->toBe(0.0)
+        ->and(Cache::get('studio-cli.presence.position'))->toBe(0.42);
+});
+
+it('hands the player every setting it needs in one go, including the clips to have ready', function (): void {
+    aClipFor('cli-workflow_started');
+    aClipFor('cli-workflow_done');
+    config()->set('studio-cli.presence.window.draggable', false);
+    config()->set('studio-cli.presence.playback.swap_seconds', 0.2);
+    Cache::forget('studio-cli.presence.position');
+
+    $settings = (fn (): array => $this->containerSettings())->call(test()->sami);
+
+    expect($settings)->toMatchArray(['position' => 0.5, 'margin' => 24, 'draggable' => false, 'follow_terminal' => true, 'wait_for_loop' => true, 'swap_seconds' => 0.2])
+        ->and($settings['preload'])->toEqualCanonicalizing([test()->clips.'/cli-workflow_started.mov', test()->clips.'/cli-workflow_done.mov']);
 });

@@ -6,6 +6,7 @@ namespace ArtisanStudio\StudioCli;
 
 use ArtisanStudio\StudioCli\Saloon\Requests\CheckoutRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\CommandResultRequest;
+use ArtisanStudio\StudioCli\Saloon\Requests\ListPresenceStatesRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\ListProjectsRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\ListWorkflowsRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\NextCommandRequest;
@@ -13,6 +14,7 @@ use ArtisanStudio\StudioCli\Saloon\Requests\SubmitReviewRequest;
 use ArtisanStudio\StudioCli\Saloon\StudioConnector;
 use Closure;
 use RuntimeException;
+use Throwable;
 
 class Studio
 {
@@ -113,6 +115,38 @@ class Studio
         $this->stream ??= new EventStream($this->streamUrl(), $this->token());
 
         $this->stream->read($onEvent);
+    }
+
+    /**
+     * @return list<array{state_key: string, desktop: array{url: string, updated: int|null}|null}>
+     */
+    public function presenceStates(): array
+    {
+        try {
+            $response = $this->connector()->send(new ListPresenceStatesRequest);
+        } catch (Throwable) {
+            return [];
+        }
+
+        return $response->successful()
+            ? array_values(array_map($this->presenceState(...), array_filter((array) $response->json('states', []), is_array(...))))
+            : [];
+    }
+
+    /**
+     * @param  array<mixed>  $state
+     * @return array{state_key: string, desktop: array{url: string, updated: int|null}|null}
+     */
+    private function presenceState(array $state): array
+    {
+        $desktop = $state['desktop'] ?? null;
+
+        return [
+            'state_key' => (string) ($state['state_key'] ?? ''),
+            'desktop' => is_array($desktop) && is_string($desktop['url'] ?? null)
+                ? ['url' => $desktop['url'], 'updated' => is_numeric($desktop['updated'] ?? null) ? (int) $desktop['updated'] : null]
+                : null,
+        ];
     }
 
     private function streamUrl(): string

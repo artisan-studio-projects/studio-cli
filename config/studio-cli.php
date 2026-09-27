@@ -180,6 +180,48 @@ return [
 
         'clips' => env('STUDIO_CLI_PRESENCE_CLIPS', base_path('storage/app/sami')),
 
+        /*
+        | Where her clips come from. "studio" downloads them from Artisan Studio
+        | into `cache`, once, and again only when a clip changes there. "local"
+        | plays the .mov files in `clips` just as they are.
+        */
+
+        'source' => env('STUDIO_CLI_PRESENCE_SOURCE', 'studio'),
+
+        'cache' => env('STUDIO_CLI_PRESENCE_CACHE', storage_path('app/studio-cli/avatar')),
+
         'size' => env('STUDIO_CLI_PRESENCE_SIZE', 400),
+
+        /*
+        | Where she stands and how her window behaves. `position` is where she
+        | first appears along the bottom of the screen: "left", "center",
+        | "right", or a percentage of the way across, like "75%". Drag her
+        | somewhere else and she comes back there next time, unless
+        | `remember_where_dragged` is off.
+        */
+
+        'window' => [
+            'position' => env('STUDIO_CLI_PRESENCE_POSITION', 'center'),
+            'margin' => 24,
+            'remember_where_dragged' => true,
+            'draggable' => true,
+            'always_on_top' => true,
+            'follow_terminal' => true,
+            'follow_every_seconds' => 1.0,
+            'hide_when_away' => true,
+            'terminal_min_width' => 400,
+            'terminal_min_height' => 300,
+        ],
+
+        /*
+        | How clips follow each other. `wait_for_loop` lets a reaction start
+        | once her resting loop comes round, so the two join without a jump;
+        | `swap_seconds` is how long both clips overlap at the cut.
+        */
+
+        'playback' => [
+            'wait_for_loop' => true,
+            'swap_seconds' => 0.08,
+        ],
     ],
 ];

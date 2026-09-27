@@ -1,12 +1,76 @@
 import AVFoundation
 import AppKit
 
+/// Everything about how the window looks and behaves, decided by Laravel.
+///
+/// Laravel passes these as JSON in the first argument, so a new behaviour is a
+/// config key on the PHP side rather than a change here.
+struct Settings {
+    var size: CGFloat = 360
+    var position: CGFloat = 0.5
+    var margin: CGFloat = 24
+    var draggable = true
+    var alwaysOnTop = true
+    var followTerminal = true
+    var followEvery: Double = 1.0
+    var hideWhenAway = true
+    var terminalMinWidth: CGFloat = 400
+    var terminalMinHeight: CGFloat = 300
+    var waitForLoop = true
+    var swapSeconds: Double = 0.08
+    var preload: [String] = []
+
+    init() {}
+
+    init(json: String) {
+        guard
+            let data = json.data(using: .utf8),
+            let given = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        else {
+            return
+        }
+
+        size = CGFloat((given["size"] as? NSNumber)?.doubleValue ?? Double(size))
+        position = CGFloat((given["position"] as? NSNumber)?.doubleValue ?? Double(position))
+        margin = CGFloat((given["margin"] as? NSNumber)?.doubleValue ?? Double(margin))
+        draggable = (given["draggable"] as? Bool) ?? draggable
+        alwaysOnTop = (given["always_on_top"] as? Bool) ?? alwaysOnTop
+        followTerminal = (given["follow_terminal"] as? Bool) ?? followTerminal
+        followEvery = (given["follow_every_seconds"] as? NSNumber)?.doubleValue ?? followEvery
+        hideWhenAway = (given["hide_when_away"] as? Bool) ?? hideWhenAway
+        terminalMinWidth = CGFloat((given["terminal_min_width"] as? NSNumber)?.doubleValue ?? Double(terminalMinWidth))
+        terminalMinHeight = CGFloat((given["terminal_min_height"] as? NSNumber)?.doubleValue ?? Double(terminalMinHeight))
+        waitForLoop = (given["wait_for_loop"] as? Bool) ?? waitForLoop
+        swapSeconds = (given["swap_seconds"] as? NSNumber)?.doubleValue ?? swapSeconds
+        preload = (given["preload"] as? [String]) ?? preload
+    }
+}
+
+/// Tells Laravel something happened, one JSON object per line.
+func report(_ message: [String: Any]) {
+    guard
+        let data = try? JSONSerialization.data(withJSONObject: message),
+        let line = String(data: data, encoding: .utf8)
+    else {
+        return
+    }
+
+    FileHandle.standardOutput.write((line + "\n").data(using: .utf8)!)
+}
+
 final class SamiWindow: NSWindow {
+    var draggable = true
+
+    var dropped: ((NSRect) -> Void)?
+
     override var canBecomeKey: Bool { true }
 
     override func mouseDown(with event: NSEvent) {
+        guard draggable else { return }
+
         let start = NSEvent.mouseLocation
         let origin = frame.origin
+        let home = (screen ?? NSScreen.main)?.frame ?? frame
 
         while let next = nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) {
             if next.type == .leftMouseUp {
@@ -15,18 +79,19 @@ final class SamiWindow: NSWindow {
 
             let now = NSEvent.mouseLocation
 
-            let under = NSScreen.screens.first { NSMouseInRect(now, $0.frame, false) }
-                ?? screen
-
             setFrame(
                 NSRect(
-                    x: origin.x + (now.x - start.x),
-                    y: under?.frame.minY ?? frame.minY,
+                    x: min(max(origin.x + (now.x - start.x), home.minX), home.maxX - frame.width),
+                    y: home.minY,
                     width: frame.width,
                     height: frame.height
                 ),
                 display: true
             )
+        }
+
+        if frame.origin != origin {
+            dropped?(frame)
         }
     }
 }
@@ -47,20 +112,19 @@ final class Delegate: NSObject, NSApplicationDelegate {
     /// A one-shot clip that arrived mid-loop, waiting for the loop to come round.
     private var queued: URL?
     private var waitingOnLoop: Any?
-    private let source: URL
-    private let side: CGFloat
+    private var settings: Settings
+    private let source: URL?
     private let loops: Bool
 
-    private func leave() -> Never {
-        exit(0)
-    }
-
-    init(source: URL, side: CGFloat, loops: Bool) {
+    init(settings: Settings, source: URL?, loops: Bool) {
+        self.settings = settings
         self.source = source
-        self.side = side
         self.loops = loops
     }
 
+    /// Where she stands on a screen: `position` runs from 0 at the left to 1 at
+    /// the right, inside the margin, so left, centre, right and any percentage
+    /// are all the same number to her.
     private func standingPlace() -> NSRect {
         let screen = standingOn
             ?? NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }
@@ -68,31 +132,39 @@ final class Delegate: NSObject, NSApplicationDelegate {
             ?? NSScreen.screens.first
 
         let full = screen?.frame ?? .zero
+        let room = max(0, full.width - settings.size - 2 * settings.margin)
 
         return NSRect(
-            x: full.midX - side / 2,
+            x: full.minX + settings.margin + room * min(1, max(0, settings.position)),
             y: full.minY,
-            width: side,
-            height: side
+            width: settings.size,
+            height: settings.size
         )
+    }
+
+    private func wasDropped(at frame: NSRect) {
+        let full = (window.screen ?? NSScreen.main)?.frame ?? .zero
+        let room = max(1, full.width - settings.size - 2 * settings.margin)
+
+        settings.position = min(1, max(0, (frame.minX - full.minX - settings.margin) / room))
+
+        report(["moved": Double(settings.position)])
     }
 
     private var standingOn: NSScreen?
 
     private var homeWindow: CGWindowID?
 
-    private func ownerWindows() -> [(id: CGWindowID, frame: NSRect)] {
-        guard let pid = owner?.processIdentifier else { return [] }
-
+    private func windowsFrontToBack() -> [(id: CGWindowID, pid: pid_t, frame: NSRect)] {
         let listed = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
 
         guard let windows = listed as? [[String: Any]] else { return [] }
 
-        return windows.filter {
-            ($0[kCGWindowOwnerPID as String] as? pid_t) == pid
-        }.compactMap { window in
+        return windows.compactMap { window in
             guard
                 let id = window[kCGWindowNumber as String] as? CGWindowID,
+                let pid = window[kCGWindowOwnerPID as String] as? pid_t,
+                (window[kCGWindowLayer as String] as? Int) == 0,
                 let bounds = window[kCGWindowBounds as String] as? [String: CGFloat]
             else {
                 return nil
@@ -105,8 +177,23 @@ final class Delegate: NSObject, NSApplicationDelegate {
                 height: bounds["Height"] ?? 0
             )
 
-            return frame.width >= 400 && frame.height >= 300 ? (id, frame) : nil
+            return frame.width >= settings.terminalMinWidth && frame.height >= settings.terminalMinHeight ? (id, pid, frame) : nil
         }
+    }
+
+    private func ownerWindows() -> [(id: CGWindowID, frame: NSRect)] {
+        guard let pid = owner?.processIdentifier else { return [] }
+
+        return windowsFrontToBack().filter { $0.pid == pid }.map { ($0.id, $0.frame) }
+    }
+
+    private func screenOf(_ frame: NSRect) -> NSScreen? {
+        let flipped = NSPoint(
+            x: frame.midX,
+            y: (NSScreen.screens.first?.frame.maxY ?? 0) - frame.midY
+        )
+
+        return NSScreen.screens.first { NSMouseInRect(flipped, $0.frame, false) }
     }
 
     private func screenShowingHome() -> NSScreen? {
@@ -120,16 +207,13 @@ final class Delegate: NSObject, NSApplicationDelegate {
             return nil
         }
 
-        let flipped = NSPoint(
-            x: home.frame.midX,
-            y: (NSScreen.screens.first?.frame.maxY ?? 0) - home.frame.midY
-        )
-
-        return NSScreen.screens.first { NSMouseInRect(flipped, $0.frame, false) }
+        return screenOf(home.frame)
     }
 
     private func followHerWindow() {
-        Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+        guard settings.followTerminal else { return }
+
+        Timer.scheduledTimer(withTimeInterval: max(0.2, settings.followEvery), repeats: true) { [weak self] _ in
             guard let self, let window = self.window else { return }
 
             guard let now = self.screenShowingHome(), now !== self.standingOn else { return }
@@ -165,8 +249,12 @@ final class Delegate: NSObject, NSApplicationDelegate {
 
     private var watchingFocus = false
 
+    private var showing = true
+
+    private var toldToHide = false
+
     private func hideWhenTheyLookAway() {
-        guard !watchingFocus else { return }
+        guard settings.hideWhenAway, !watchingFocus else { return }
 
         watchingFocus = true
 
@@ -176,20 +264,35 @@ final class Delegate: NSObject, NSApplicationDelegate {
             forName: NSWorkspace.didActivateApplicationNotification,
             object: nil,
             queue: .main
-        ) { [weak self] note in
-            guard let self, let owner = self.owner else { return }
+        ) { [weak self] _ in
+            self?.showOnlyOverHome()
+        }
 
-            let now = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+        Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+            self?.showOnlyOverHome()
+        }
+    }
 
-            let mine = now?.processIdentifier == ProcessInfo.processInfo.processIdentifier
+    private func homeIsInFront() -> Bool {
+        guard let home = homeWindow, let window else { return true }
 
-            let theirs = mine || now?.bundleIdentifier == owner.bundleIdentifier
+        let mine = NSScreen.screens.first { NSMouseInRect(NSPoint(x: window.frame.midX, y: window.frame.midY), $0.frame, false) }
+        let me = ProcessInfo.processInfo.processIdentifier
 
-            if theirs {
-                self.window?.orderFrontRegardless()
-            } else {
-                self.window?.orderOut(nil)
-            }
+        return windowsFrontToBack().first { $0.pid != me && screenOf($0.frame) === mine }?.id == home
+    }
+
+    private func showOnlyOverHome() {
+        let wanted = !toldToHide && homeIsInFront()
+
+        guard wanted != showing else { return }
+
+        showing = wanted
+
+        if wanted {
+            window?.orderFrontRegardless()
+        } else {
+            window?.orderOut(nil)
         }
     }
 
@@ -197,7 +300,15 @@ final class Delegate: NSObject, NSApplicationDelegate {
 
     private var loaded: [String: AVPlayerItem] = [:]
 
-    private func warmTheRest(besides first: URL) {
+    private func warmUp() {
+        if !settings.preload.isEmpty {
+            settings.preload.forEach { preload(URL(fileURLWithPath: $0)) }
+
+            return
+        }
+
+        guard let first = source else { return }
+
         let folder = first.deletingLastPathComponent()
 
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path) else {
@@ -244,7 +355,7 @@ final class Delegate: NSObject, NSApplicationDelegate {
                 object: item,
                 queue: .main
             ) { [weak self] _ in
-                FileHandle.standardOutput.write("finished\n".data(using: .utf8)!)
+                report(["finished": url.path])
 
                 guard let self, let resting = self.restingClip else { return }
 
@@ -265,7 +376,7 @@ final class Delegate: NSObject, NSApplicationDelegate {
 
         guard previous != next else { return }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + settings.swapSeconds) { [weak self] in
             guard let self, self.front != previous else { return }
 
             self.layers[previous].isHidden = true
@@ -280,7 +391,7 @@ final class Delegate: NSObject, NSApplicationDelegate {
             let line = heardSoFar
             heardSoFar = ""
 
-            DispatchQueue.main.async { self.wasToldToPlay(line) }
+            DispatchQueue.main.async { self.wasTold(line) }
 
             return
         }
@@ -295,7 +406,7 @@ final class Delegate: NSObject, NSApplicationDelegate {
     /// the frame it opened on, which is the frame every spoken clip opens on
     /// too, so waiting for it is what makes the two join without a jump.
     private func playAtTheEndOfTheLoop(_ url: URL) {
-        guard let item = players[front].currentItem, loopers[front] != nil else {
+        guard settings.waitForLoop, let item = players[front].currentItem, loopers[front] != nil else {
             play(url, looping: false)
 
             return
@@ -325,15 +436,50 @@ final class Delegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func wasToldToPlay(_ line: String) {
-        let wantsLoop = line.hasSuffix(" --loop")
-        let path = wantsLoop ? String(line.dropLast(7)) : line
+    /// A message from Laravel: a JSON object, or the older bare `path [--loop]`.
+    private func wasTold(_ line: String) {
+        guard line.hasPrefix("{") else {
+            let wantsLoop = line.hasSuffix(" --loop")
 
+            playClip(wantsLoop ? String(line.dropLast(7)) : line, looping: wantsLoop)
+
+            return
+        }
+
+        guard
+            let data = line.data(using: .utf8),
+            let message = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        else {
+            return
+        }
+
+        if let paths = message["preload"] as? [String] {
+            paths.forEach { preload(URL(fileURLWithPath: $0)) }
+        }
+
+        if message["hide"] as? Bool == true {
+            toldToHide = true
+            showing = false
+            window?.orderOut(nil)
+        }
+
+        if message["show"] as? Bool == true {
+            toldToHide = false
+            showing = true
+            window?.orderFrontRegardless()
+        }
+
+        if let path = message["play"] as? String {
+            playClip(path, looping: (message["loop"] as? Bool) ?? false)
+        }
+    }
+
+    private func playClip(_ path: String, looping: Bool) {
         guard FileManager.default.fileExists(atPath: path) else { return }
 
         let url = URL(fileURLWithPath: path)
 
-        if wantsLoop {
+        if looping {
             queued = nil
 
             play(url, looping: true)
@@ -360,11 +506,9 @@ final class Delegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
-
     }
 
     func applicationDidFinishLaunching(_: Notification) {
-
         owner = terminalThatStartedMe()
 
         standingOn = screenShowingHome()
@@ -381,9 +525,11 @@ final class Delegate: NSObject, NSApplicationDelegate {
         window.isOpaque = false
         window.backgroundColor = .clear
         window.hasShadow = false
-        window.level = .floating
+        window.level = settings.alwaysOnTop ? .floating : .normal
         window.ignoresMouseEvents = false
         window.isMovableByWindowBackground = false
+        window.draggable = settings.draggable
+        window.dropped = { [weak self] frame in self?.wasDropped(at: frame) }
 
         window.collectionBehavior = [.moveToActiveSpace, .stationary]
 
@@ -418,32 +564,43 @@ final class Delegate: NSObject, NSApplicationDelegate {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
-        if source.lastPathComponent != "-" {
+        if let source {
             play(source, looping: loops)
         }
 
         hideWhenTheyLookAway()
         followHerWindow()
         listenForClips()
-        warmTheRest(besides: source)
+        warmUp()
     }
 }
 
 let args = CommandLine.arguments
 
 guard args.count > 1 else {
-    print("usage: SamiDesktop <file.webm|mov> [size] [--loop]")
+    print("usage: SamiDesktop '<settings json>'  or  SamiDesktop <file.mov|-> [size] [--loop]")
     exit(1)
 }
 
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 
-let delegate = Delegate(
-    source: URL(fileURLWithPath: args[1]),
-    side: args.count > 2 ? CGFloat(Double(args[2]) ?? 360) : 360,
-    loops: args.contains("--loop")
-)
+let delegate: Delegate
+
+if args[1].hasPrefix("{") {
+    delegate = Delegate(settings: Settings(json: args[1]), source: nil, loops: false)
+} else {
+    var settings = Settings()
+    settings.size = args.count > 2 ? CGFloat(Double(args[2]) ?? 360) : 360
+    settings.position = 0.5
+    settings.margin = 0
+
+    delegate = Delegate(
+        settings: settings,
+        source: args[1] == "-" ? nil : URL(fileURLWithPath: args[1]),
+        loops: args.contains("--loop")
+    )
+}
 
 app.delegate = delegate
 app.run()
