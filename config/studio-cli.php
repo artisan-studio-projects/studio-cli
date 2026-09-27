@@ -60,6 +60,84 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Theme
+    |--------------------------------------------------------------------------
+    |
+    | The colours every `studio` screen is drawn in, as hex. `mode` picks the
+    | set: "dark" for a dark terminal, "light" for a light one.
+    |
+    | `background` is painted over the whole terminal: black in dark mode, a
+    | light slate grey in light mode. Set it to "terminal" to draw on the
+    | terminal's own background instead.
+    |
+    | Components ask for a colour by name, so changing one here recolours it
+    | everywhere it is used. Leave a name out and its default is used; a value
+    | that is not a hex is ignored the same way.
+    |
+    */
+
+    'theme' => [
+        'mode' => env('ARTISAN_STUDIO_THEME', 'dark'),
+
+        'dark' => [
+            'background' => '000000',
+
+            'colours' => [
+                'ink' => 'eef1fd',
+                'soft' => 'b3bbd9',
+                'dim' => '7a84ad',
+                'band' => '131a29',
+                'edge' => '2a3249',
+                'track' => '1c2335',
+                'cyan' => '1deced',
+                'cyan-bg' => '0a3a40',
+                'blue' => '3b82f6',
+                'blue-bg' => '0f2552',
+                'sky' => 'a5f3fc',
+                'sky-bg' => '123b45',
+                'green' => '6fdca6',
+                'green-bg' => '123a28',
+                'amber' => 'f5b454',
+                'amber-bg' => '3d2c10',
+                'rose' => 'ff8aa6',
+                'rose-bg' => '421626',
+                'glow-from' => '1deced',
+                'glow-to' => '3b82f6',
+                'glow-head' => '00fff0',
+            ],
+        ],
+
+        'light' => [
+            'background' => 'f1f5f9',
+
+            'colours' => [
+                'ink' => '0f172a',
+                'soft' => '334155',
+                'dim' => '64748b',
+                'band' => 'e2e8f0',
+                'edge' => 'cbd5e1',
+                'track' => 'd5dce6',
+                'cyan' => '0891b2',
+                'cyan-bg' => 'cffafe',
+                'blue' => '2563eb',
+                'blue-bg' => 'dbeafe',
+                'sky' => '0284c7',
+                'sky-bg' => 'e0f2fe',
+                'green' => '16a34a',
+                'green-bg' => 'dcfce7',
+                'amber' => 'd97706',
+                'amber-bg' => 'fef3c7',
+                'rose' => 'e11d48',
+                'rose-bg' => 'ffe4e6',
+                'glow-from' => '06b6d4',
+                'glow-to' => '2563eb',
+                'glow-head' => '1e40af',
+            ],
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Dev tab
     |--------------------------------------------------------------------------
     |
