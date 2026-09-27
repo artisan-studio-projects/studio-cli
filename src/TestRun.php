@@ -7,7 +7,6 @@ namespace ArtisanStudio\StudioCli;
 use ArtisanStudio\StudioCli\Dashboard\SnapshotSource;
 use ArtisanStudio\StudioCli\Terminal\Action;
 use ArtisanStudio\StudioCli\Terminal\Components\Columns\Column;
-use ArtisanStudio\StudioCli\Terminal\Components\Columns\StatusColumn;
 use ArtisanStudio\StudioCli\Terminal\Components\Feed;
 use ArtisanStudio\StudioCli\Terminal\Components\Section;
 use ArtisanStudio\StudioCli\Terminal\Components\Text;
@@ -18,18 +17,29 @@ final class TestRun
 {
     private const int OUTPUT_LINES = 60;
 
+    private const int WRAP = 96;
+
     private ?InvokedProcess $running = null;
 
     private string $report = '';
 
     private string $output = '';
 
+    private int $runs = 0;
+
     /**
-     * @var array{passed: bool, results: list<array{file: string, passed: bool, summary: ?string}>, cases: array{passed: int, failed: int}}|null
+     * @var array{passed: bool, results: list<array{file: string, passed: bool, summary: ?string, failures: list<string>}>, cases: array{passed: int, failed: int}}|null
      */
     private ?array $outcome = null;
 
+    /**
+     * @var array{commit?: ?string, files?: list<array{path: string, status: string}>}
+     */
+    private array $saved = [];
+
     private bool $sent = false;
+
+    private bool $tried = false;
 
     private ?Settings $panel = null;
 
@@ -44,6 +54,7 @@ final class TestRun
         private readonly SnapshotSource $source,
         private readonly ActivityLog $log,
         private readonly TestSuite $suite,
+        private readonly Editor $editor,
     ) {}
 
     /**
@@ -77,9 +88,8 @@ final class TestRun
                     ->components([
                         Feed::make(fn (array $state): array => $state['rows'])
                             ->columns([
-                                StatusColumn::make('label')->width(11)->colour(fn (array $row): string => $row['colour']),
-                                Column::make('file')->colour('soft'),
-                                Column::make('note')->colour('dim'),
+                                Column::make('mark')->width(3)->colour(fn (array $row): string => $row['colour']),
+                                Column::make('line')->colour(fn (array $row): string => $row['text']),
                             ]),
                     ]),
             ])
@@ -92,6 +102,19 @@ final class TestRun
                     ->label('Switch to '.$this->branch().' and run tests')
                     ->visible(fn (array $state): bool => $state['ready'] && ! $state['on'])
                     ->action(fn (): string => $this->start()),
+                Action::make('save')
+                    ->label('Save changes')
+                    ->visible(fn (array $state): bool => $state['green'] && $state['edited'] && ! $state['sent'])
+                    ->asks('How did you get them passing? What was wrong, in your own words.')
+                    ->action(fn (string $why): string => $this->save($why)),
+                Action::make('again')
+                    ->label('Run again')
+                    ->visible(fn (array $state): bool => $state['red'] && ! $state['sent'])
+                    ->action(fn (): string => $this->start()),
+                Action::make('failing')
+                    ->label('Send as failing')
+                    ->visible(fn (array $state): bool => $state['red'] && ! $state['sent'])
+                    ->action(fn (): string => $this->deliver()),
                 Action::make('retry')
                     ->label('Send the results again')
                     ->visible(fn (array $state): bool => $state['unsent'])
@@ -114,11 +137,15 @@ final class TestRun
             unlink($this->report);
         }
 
-        $this->deliver();
+        match (true) {
+            ! $this->outcome['passed'] => $this->openTheFailures(),
+            $this->changes->sinceTheLastCommit() === [] => $this->deliver(),
+            default => null,
+        };
     }
 
     /**
-     * @return array{about: string, situation: string, colour: string, on: bool, ready: bool, unsent: bool, aside: string, rows: list<array{label: string, colour: string, file: string, note: string}>}
+     * @return array{about: string, situation: string, colour: string, on: bool, ready: bool, green: bool, red: bool, edited: bool, sent: bool, unsent: bool, aside: string, rows: list<array{mark: string, colour: string, line: string, text: string}>}
      */
     private function state(): array
     {
@@ -126,6 +153,7 @@ final class TestRun
         $on = $branch !== null && $this->git->now()['branch'] === $branch;
         $problem = $this->suite->problem();
         $blocked = $branch === null || (! $on && $this->git->blocksReviewing($branch));
+        $settled = $this->running === null && $this->outcome !== null;
 
         return [
             'about' => $this->about(),
@@ -133,8 +161,12 @@ final class TestRun
             'colour' => $problem !== null || ($blocked && $this->outcome === null) ? 'rose' : 'amber',
             'on' => $on,
             'ready' => $this->running === null && $this->outcome === null && $problem === null && ! $blocked,
-            'unsent' => $this->outcome !== null && ! $this->sent,
-            'aside' => trans_choice(':count file|:count files', count($this->files())),
+            'green' => $settled && $this->outcome['passed'],
+            'red' => $settled && ! $this->outcome['passed'],
+            'edited' => $settled && $this->changes->sinceTheLastCommit() !== [],
+            'sent' => $this->sent,
+            'unsent' => $this->tried && ! $this->sent,
+            'aside' => $this->aside(),
             'rows' => $this->rows(),
         ];
     }
@@ -143,19 +175,22 @@ final class TestRun
     {
         $count = trans_choice(':count test file|:count test files', count($this->files()));
 
-        if ($this->running !== null) {
-            return "Running {$count} on your machine…";
-        }
+        return match (true) {
+            $this->running !== null => "Running {$count} on your machine…",
+            $this->outcome === null => "Prover wrote {$count} for this build. Running them here runs only those files, and the results go to Guard.",
+            $this->sent => 'Sent to the studio. Guard checks the build next.',
+            $this->outcome['passed'] => 'They pass. Save your changes to send them, with why you made them.',
+            default => 'Fix them in your editor, then run them again. Nothing is committed while they fail.',
+        };
+    }
 
+    private function aside(): string
+    {
         if ($this->outcome === null) {
-            return "Prover wrote {$count} for this build. Running them here runs only those files, and the results go back to the studio for Guard.";
+            return trans_choice(':count file|:count files', count($this->files()));
         }
 
-        $passed = count(array_filter($this->outcome['results'], fn (array $result): bool => $result['passed']));
-        $total = count($this->outcome['results']);
-
-        return "{$passed} of {$total} test files passed: {$this->outcome['cases']['passed']} tests passed, {$this->outcome['cases']['failed']} failed."
-            .($this->sent ? ' Sent to the studio. Guard checks the build next.' : '');
+        return "Test run {$this->runs} · {$this->outcome['cases']['passed']} passed · {$this->outcome['cases']['failed']} failed";
     }
 
     private function situation(?string $branch, bool $on, ?string $problem): string
@@ -165,8 +200,7 @@ final class TestRun
 
         return match (true) {
             $problem !== null => $problem,
-            $this->running !== null => '',
-            $this->outcome !== null => $this->sent ? '' : 'The results have not reached the studio yet.',
+            $this->running !== null || $this->outcome !== null => '',
             $branch === null => 'The artisans have not pushed a branch for this yet.',
             $on => "On {$branch}.",
             $now['uncommitted'] > 0 => "You are on {$now['branch']} with {$changes}. Commit or stash them first: running the tests switches you to {$branch}.",
@@ -175,25 +209,28 @@ final class TestRun
     }
 
     /**
-     * @return list<array{label: string, colour: string, file: string, note: string}>
+     * @return list<array{mark: string, colour: string, line: string, text: string}>
      */
     private function rows(): array
     {
-        if ($this->outcome !== null && $this->outcome['results'] !== []) {
-            return array_map(fn (array $result): array => [
-                'label' => $result['passed'] ? 'Passed' : 'Failed',
-                'colour' => $result['passed'] ? 'green' : 'rose',
-                'file' => $result['file'],
-                'note' => (string) $result['summary'],
-            ], $this->outcome['results']);
+        if ($this->outcome === null || $this->outcome['results'] === []) {
+            return array_map(fn (string $file): array => [
+                'mark' => $this->running === null ? '·' : '…',
+                'colour' => $this->running === null ? 'dim' : 'blue',
+                'line' => $file,
+                'text' => 'soft',
+            ], $this->files());
         }
 
-        return array_map(fn (string $file): array => [
-            'label' => $this->running === null ? 'Ready' : 'Running',
-            'colour' => $this->running === null ? 'dim' : 'blue',
-            'file' => $file,
-            'note' => '',
-        ], $this->files());
+        return array_values(collect($this->outcome['results'])
+            ->flatMap(fn (array $result): array => [
+                ['mark' => $result['passed'] ? '✓' : '✗', 'colour' => $result['passed'] ? 'green' : 'rose', 'line' => $result['file'], 'text' => 'ink'],
+                ...collect($result['failures'])
+                    ->flatMap(fn (string $failure): array => explode("\n", wordwrap($failure, self::WRAP, "\n", true)))
+                    ->map(fn (string $line): array => ['mark' => '', 'colour' => 'dim', 'line' => '  '.$line, 'text' => 'dim'])
+                    ->all(),
+            ])
+            ->all());
     }
 
     private function start(): string
@@ -211,8 +248,13 @@ final class TestRun
             return 'Could not switch to '.$branch.'. The tests are still waiting.';
         }
 
-        $this->changes->catchUp($remote);
+        if ($this->changes->sinceTheLastCommit() === []) {
+            $this->changes->catchUp($remote);
+        }
+
         $this->git->forget();
+        $this->outcome = null;
+        $this->runs++;
         $this->report = sys_get_temp_dir().'/studio-tests-'.bin2hex(random_bytes(8)).'.xml';
         $this->running = $this->suite->start($files, $this->report);
         $this->log('Running the tests', 'blue', trans_choice(':count test file|:count test files', count($files)));
@@ -222,13 +264,59 @@ final class TestRun
         return 'Running the tests on '.$branch.'.'.($aside === null ? '' : ' Your local '.$branch.' was from an earlier run, so it is kept as '.$aside.'.');
     }
 
+    private function openTheFailures(): void
+    {
+        $failing = array_values(array_map(
+            fn (array $result): string => $result['file'],
+            array_filter($this->outcome['results'] ?? [], fn (array $result): bool => ! $result['passed']),
+        ));
+
+        if ($failing !== [] && $this->editor->name() !== null) {
+            $this->editor->open($failing);
+        }
+    }
+
+    private function save(string $why): string
+    {
+        $files = $this->changes->sinceTheLastCommit();
+        $branch = (string) $this->branch();
+
+        if ($files === []) {
+            return $this->deliver();
+        }
+
+        $scope = $this->changes->scopeOfTheLastCommit();
+        $sha = $this->changes->commitEverything(($scope === null ? 'fix' : 'fix('.$scope.')').': developer got the tests passing for "'.(string) ($this->workflow()['name'] ?? 'this build').'"'."\n\nReason for change:\n".trim($why));
+
+        if (! $this->changes->publish($branch, $this->remote())) {
+            return 'Committed here, but it could not be pushed to '.$branch.'. Try saving again.';
+        }
+
+        $this->saved = ['commit' => $sha, 'files' => $files];
+
+        return $this->deliver();
+    }
+
     private function deliver(): string
     {
         if ($this->outcome === null) {
             return 'Nothing has run yet.';
         }
 
-        $taken = $this->studio->submitTestRun($this->workflowId(), (string) $this->task['id'], [...$this->outcome, 'output' => $this->output]);
+        $this->tried = true;
+        $results = array_map(fn (array $result): array => [
+            'file' => $result['file'],
+            'passed' => $result['passed'],
+            'summary' => $result['summary'],
+        ], $this->outcome['results']);
+
+        $taken = $this->studio->submitTestRun($this->workflowId(), (string) $this->task['id'], [
+            'passed' => $this->outcome['passed'],
+            'results' => $results,
+            'cases' => $this->outcome['cases'],
+            'output' => $this->output,
+            ...$this->saved,
+        ]);
 
         if ($taken === null) {
             return 'The tests ran, but the studio did not take the results. Try sending again.';

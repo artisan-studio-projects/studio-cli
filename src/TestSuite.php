@@ -33,7 +33,7 @@ class TestSuite
     {
         return Process::path($this->root)
             ->timeout(self::TIMEOUT)
-            ->start(['php', 'artisan', 'test', '--compact', '--log-junit', $report, ...$this->runnable($files)]);
+            ->start(['php', 'artisan', 'test', '--compact', '--without-tty', '--log-junit', $report, ...$this->runnable($files)]);
     }
 
     /**
@@ -51,7 +51,7 @@ class TestSuite
     }
 
     /**
-     * @return array{passed: bool, results: list<array{file: string, passed: bool, summary: ?string}>, cases: array{passed: int, failed: int}}
+     * @return array{passed: bool, results: list<array{file: string, passed: bool, summary: ?string, failures: list<string>}>, cases: array{passed: int, failed: int}}
      */
     public function read(string $report, bool $succeeded): array
     {
@@ -70,17 +70,20 @@ class TestSuite
     }
 
     /**
-     * @return array{file: string, passed: bool, summary: ?string}
+     * @return array{file: string, passed: bool, summary: ?string, failures: list<string>}
      */
     private function fileResult(SimpleXMLElement $suite): array
     {
-        $failing = $suite->xpath('.//testcase[failure or error]') ?: [];
-        $first = $failing[0] ?? null;
+        $failures = array_values(array_map(
+            fn (SimpleXMLElement $case): string => mb_substr(trim((string) $case['name'].': '.Str::before(trim((string) ($case->failure ?? $case->error)), "\n")), 0, 300),
+            $suite->xpath('.//testcase[failure or error]') ?: [],
+        ));
 
         return [
             'file' => ltrim(str_replace($this->root.'/', '', (string) $suite['file']), '/'),
-            'passed' => $failing === [],
-            'summary' => $first === null ? null : mb_substr(trim((string) $first['name'].': '.Str::before(trim((string) ($first->failure ?? $first->error)), "\n")), 0, 300),
+            'passed' => $failures === [],
+            'summary' => $failures === [] ? null : mb_substr(implode("\n", $failures), 0, 2000),
+            'failures' => $failures,
         ];
     }
 

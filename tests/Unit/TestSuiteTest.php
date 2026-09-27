@@ -66,8 +66,8 @@ it('reads each file\'s result from the report, counting a dataset\'s cases once'
     expect((new TestSuite($this->folder))->read($report, false))->toBe([
         'passed' => false,
         'results' => [
-            ['file' => 'tests/Unit/PriceTest.php', 'passed' => true, 'summary' => null],
-            ['file' => 'tests/Feature/CheckoutTest.php', 'passed' => false, 'summary' => 'it checks out: Call to undefined method Cart::total()'],
+            ['file' => 'tests/Unit/PriceTest.php', 'passed' => true, 'summary' => null, 'failures' => []],
+            ['file' => 'tests/Feature/CheckoutTest.php', 'passed' => false, 'summary' => 'it checks out: Call to undefined method Cart::total()', 'failures' => ['it checks out: Call to undefined method Cart::total()']],
         ],
         'cases' => ['passed' => 2, 'failed' => 1],
     ]);

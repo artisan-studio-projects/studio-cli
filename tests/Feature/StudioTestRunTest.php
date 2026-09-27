@@ -139,6 +139,10 @@ it('runs the tests Prover wrote on the build\'s branch and sends the results bac
     ($this->press)("\n");
     $started = ($this->flash)();
     ($this->tick)();
+    $red = ($this->screen)();
+    $sentWhileRed = ($this->sent)();
+    ($this->press)("\e[B", "\n");
+    ($this->studio)()->refreshState();
     $finished = ($this->screen)();
     $sent = ($this->sent)();
 
@@ -149,7 +153,12 @@ it('runs the tests Prover wrote on the build\'s branch and sends the results bac
         ->toMatch('/⏎ Switch to sami\/checkout and run tests\s+esc  Not now/u')
         ->and($started)->toBe('Running the tests on sami/checkout.')
         ->and(($this->git)($this->work, 'rev-parse', '--abbrev-ref', 'HEAD'))->toBe('sami/checkout')
-        ->and($this->ran[0])->toBe(['php', 'artisan', 'test', '--compact', '--log-junit', $this->ran[0][5], 'tests/Feature/CartTest.php', 'tests/Unit/CartTotalTest.php'])
+        ->and($this->ran[0])->toBe(['php', 'artisan', 'test', '--compact', '--without-tty', '--log-junit', $this->ran[0][6], 'tests/Feature/CartTest.php', 'tests/Unit/CartTotalTest.php'])
+        ->and($sentWhileRed)->toBeNull()
+        ->and($red)->toContain('Test run 1 · 4 passed · 1 failed')->toContain('✗  tests/Feature/CartTest.php')->toContain('✓  tests/Unit/CartTotalTest.php')
+        ->toContain('it totals the cart: Failed asserting that 10 is identical to 12.')
+        ->toContain('Fix them in your editor, then run them again.')
+        ->toMatch('/Run again.*Send as failing/su')
         ->and($sent['url'])->toEndWith('/workflows/7/tasks/42/tests')
         ->and($sent['body'])->toMatchArray([
             'passed' => false,
@@ -160,9 +169,8 @@ it('runs the tests Prover wrote on the build\'s branch and sends the results bac
             'cases' => ['passed' => 4, 'failed' => 1],
         ])
         ->and($sent['body']['output'])->toContain('1 failed, 4 passed')
-        ->and($finished)->toContain('1 of 2 test files passed: 4 tests passed, 1 failed. Sent to the studio. Guard checks the build next.')
-        ->toContain('Failed')->toContain('it totals the cart')
-        ->and(file_exists($this->ran[0][5]))->toBeFalse()
+        ->and($finished)->toContain('Sent to the studio. Guard checks the build next.')
+        ->and(file_exists($this->ran[0][6]))->toBeFalse()
         ->and(collect(app(ActivityLog::class)->entries('7'))->pluck('label')->all())->toBe(['Tests failed', 'Running the tests']);
 });
 

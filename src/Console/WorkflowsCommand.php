@@ -147,9 +147,9 @@ class WorkflowsCommand extends Command implements ProvidesTab, RunsInBackground
                         Text::make(fn (array $task): string => $task['summary'] === '' ? 'No summary for this task yet.' : $task['summary'])->colour('soft')->wrap(),
                     ]),
                     Section::make('Files')
-                        ->aside(fn (array $task): string => trans_choice(':count file|:count files', count($task['files'])))
+                        ->aside(fn (array $task): string => trans_choice(':count file|:count files', count($this->filesOf($task))))
                         ->components([
-                            Table::make(fn (array $task): array => $task['files'])
+                            Table::make(fn (array $task): array => $this->filesOf($task))
                                 ->emptyState('No files for this task yet.')
                                 ->columns([
                                     Column::make('path')->label('File'),
@@ -287,6 +287,17 @@ class WorkflowsCommand extends Command implements ProvidesTab, RunsInBackground
     private function testRunOf(array $task): TestRun
     {
         return ($this->testRuns[(string) $task['id']] ??= app(TestRun::class, ['task' => $task]))->seeing($task);
+    }
+
+    /**
+     * @param  array<string, mixed>  $task
+     * @return list<array{path: string, kind: string}>
+     */
+    private function filesOf(array $task): array
+    {
+        return ($task['tests'] ?? null) === null
+            ? array_values((array) $task['files'])
+            : array_values(array_map(fn (string $path): array => ['path' => $path, 'kind' => 'test'], (array) ($task['tests']['files'] ?? [])));
     }
 
     /**
