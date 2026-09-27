@@ -8,10 +8,10 @@ use ArtisanStudio\StudioCli\Console\AvatarSyncCommand;
 use ArtisanStudio\StudioCli\Console\BuildPresenceCommand;
 use ArtisanStudio\StudioCli\Console\DashboardCommand;
 use ArtisanStudio\StudioCli\Console\InsightsCommand;
-use ArtisanStudio\StudioCli\Console\ReviewCommand;
 use ArtisanStudio\StudioCli\Console\SettingsCommand;
 use ArtisanStudio\StudioCli\Console\StudioCommand;
 use ArtisanStudio\StudioCli\Console\WatchCommand;
+use ArtisanStudio\StudioCli\Console\WorkflowsCommand;
 use ArtisanStudio\StudioCli\Dashboard\LiveSnapshots;
 use ArtisanStudio\StudioCli\Dashboard\SnapshotSource;
 use ArtisanStudio\StudioCli\Events\StudioReported;
@@ -46,6 +46,8 @@ class StudioCliServiceProvider extends ServiceProvider
 
         $this->app->singleton(ScreenRequests::class);
 
+        $this->app->singleton(BranchStatus::class);
+
         $this->app->singleton(SnapshotSource::class, LiveSnapshots::class);
 
         $this->app->singleton(Presence::class);
@@ -62,10 +64,10 @@ class StudioCliServiceProvider extends ServiceProvider
             BuildPresenceCommand::class,
             DashboardCommand::class,
             InsightsCommand::class,
-            ReviewCommand::class,
             SettingsCommand::class,
             StudioCommand::class,
             WatchCommand::class,
+            WorkflowsCommand::class,
         ]);
 
         $this->publishes([

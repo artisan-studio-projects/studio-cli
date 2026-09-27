@@ -20,6 +20,8 @@ use Symfony\Component\Process\Process;
  */
 class Errand
 {
+    private const int TIMEOUT = 300;
+
     public function __construct(private readonly string $root) {}
 
     /**
@@ -30,24 +32,75 @@ class Errand
      */
     public function run(string $name, array $arguments = []): array
     {
+        $process = $this->start($name, $arguments);
+
+        if ($process === null) {
+            return $this->unknown($name);
+        }
+
+        $process->wait();
+
+        return $this->answerFrom($process);
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     */
+    public function start(string $name, array $arguments = []): ?Process
+    {
         $command = $this->whatThatMeans($name, $arguments);
 
         if ($command === null) {
-            return [
-                'output' => '',
-                'exit_code' => 1,
-                'error' => 'This version of the CLI does not know how to answer "'.$name.'".',
-            ];
+            return null;
         }
 
-        $process = new Process($command, $this->root, timeout: 300);
-        $process->run();
+        $process = new Process($command, $this->root, timeout: self::TIMEOUT);
+        $process->start();
 
+        return $process;
+    }
+
+    /**
+     * @return array{output: string, exit_code: int, error: ?string}
+     */
+    public function answerFrom(Process $process): array
+    {
         return [
             'output' => $this->trimmed($process->getOutput().$process->getErrorOutput()),
             'exit_code' => (int) $process->getExitCode(),
             'error' => null,
         ];
+    }
+
+    public function describe(string $name): string
+    {
+        return match ($name) {
+            'describe_schema' => 'An artisan read your database schema',
+            'query_database' => 'An artisan looked something up in your database (read-only)',
+            'run_tests' => 'An artisan ran its tests on your machine',
+            'read_errors' => 'An artisan read your app\'s recent errors',
+            default => 'An artisan asked your app something',
+        };
+    }
+
+    /**
+     * @return array{output: string, exit_code: int, error: ?string}
+     */
+    public function unknown(string $name): array
+    {
+        return [
+            'output' => '',
+            'exit_code' => 1,
+            'error' => 'This version of the CLI does not know how to answer "'.$name.'".',
+        ];
+    }
+
+    /**
+     * @return array{output: string, exit_code: int, error: ?string}
+     */
+    public function tookTooLong(Process $process): array
+    {
+        return [...$this->answerFrom($process), 'exit_code' => 1, 'error' => 'It took longer than '.self::TIMEOUT.' seconds, so it was stopped.'];
     }
 
     /**

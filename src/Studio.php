@@ -6,12 +6,14 @@ namespace ArtisanStudio\StudioCli;
 
 use ArtisanStudio\StudioCli\Saloon\Requests\CheckoutRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\CommandResultRequest;
+use ArtisanStudio\StudioCli\Saloon\Requests\FinishTaskReviewRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\ListPresenceStatesRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\ListProjectsRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\ListWorkflowsRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\NextCommandRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\ShowSnapshotRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\ShowWorkflowRequest;
+use ArtisanStudio\StudioCli\Saloon\Requests\StartTaskReviewRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\SubmitReviewRequest;
 use ArtisanStudio\StudioCli\Saloon\StudioConnector;
 use Closure;
@@ -74,6 +76,20 @@ class Studio
     public function workflow(string $workflow): ?array
     {
         return $this->fetch(new ShowWorkflowRequest($this->project(), $workflow));
+    }
+
+    public function startTaskReview(string $workflow, string $task): bool
+    {
+        return $this->fetch(new StartTaskReviewRequest($this->project(), $workflow, $task)) !== null;
+    }
+
+    /**
+     * @param  array{outcome: string, note?: ?string, commit?: ?string, files?: list<array{path: string, status: string}>}  $review
+     * @return array<mixed>|null
+     */
+    public function finishTaskReview(string $workflow, string $task, array $review): ?array
+    {
+        return $this->fetch(new FinishTaskReviewRequest($this->project(), $workflow, $task, $review));
     }
 
     /**

@@ -42,17 +42,20 @@ it('runs the studio on its activity when the dev tab is turned on', function ():
     expect(StudioCliServiceProvider::DEV_TAB_COMMAND)->toBe('studio activity --tab');
 });
 
-it('registers the commands under their studio names, and keeps the old ones working', function (): void {
+it('registers the commands under their studio names, keeps the old ones working, and reviews only inside the studio', function (): void {
     $names = array_keys(app(Kernel::class)->all());
 
     expect($names)->toContain('studio')
         ->and($names)->toContain('studio:dashboard')
         ->and($names)->toContain('studio:insights')
+        ->and($names)->toContain('studio:workflows')
         ->and($names)->toContain('studio:watch')
         ->and($names)->toContain('studio:settings')
         ->and($names)->toContain('studio:link')
         ->and($names)->toContain('artisan-studio:watch')
-        ->and($names)->toContain('artisan-studio:link');
+        ->and($names)->toContain('artisan-studio:link')
+        ->and($names)->not->toContain('studio:review')
+        ->and($names)->not->toContain('artisan-studio:review');
 });
 
 /**

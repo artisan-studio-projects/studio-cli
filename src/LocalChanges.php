@@ -23,6 +23,9 @@ use Symfony\Component\Process\Process;
  */
 class LocalChanges
 {
+    /** @var array<string, string> */
+    private array $setAside = [];
+
     public function __construct(private readonly string $root) {}
 
     /**
@@ -127,6 +130,10 @@ class LocalChanges
     {
         $this->tryToFetch($remote);
 
+        if ($this->isFromAnEarlierRun($branch) && ! $this->setAsideAnEarlierRun($branch)) {
+            return false;
+        }
+
         if ($this->currentBranch() === $branch) {
             return true;
         }
@@ -140,6 +147,39 @@ class LocalChanges
         $this->git(['checkout', '-b', $branch, '--track', 'origin/'.$branch]);
 
         return $this->currentBranch() === $branch;
+    }
+
+    public function setAside(string $branch): ?string
+    {
+        return $this->setAside[$branch] ?? null;
+    }
+
+    private function isFromAnEarlierRun(string $branch): bool
+    {
+        $ours = 'refs/heads/'.$branch;
+        $theirs = 'refs/remotes/origin/'.$branch;
+
+        return $this->succeeds(['rev-parse', '--verify', '--quiet', $ours])
+            && $this->succeeds(['rev-parse', '--verify', '--quiet', $theirs])
+            && ! $this->succeeds(['merge-base', '--is-ancestor', $ours, $theirs])
+            && ! $this->succeeds(['merge-base', '--is-ancestor', $theirs, $ours]);
+    }
+
+    private function setAsideAnEarlierRun(string $branch): bool
+    {
+        if ($this->currentBranch() === $branch && ! $this->isClean()) {
+            return false;
+        }
+
+        $aside = $branch.'-earlier-'.trim($this->git(['rev-parse', '--short=7', 'refs/heads/'.$branch]));
+
+        if (! $this->succeeds(['branch', '-m', $branch, $aside])) {
+            return false;
+        }
+
+        $this->setAside[$branch] = $aside;
+
+        return true;
     }
 
     /**

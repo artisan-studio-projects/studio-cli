@@ -53,14 +53,13 @@ return [
     | Review
     |--------------------------------------------------------------------------
     |
-    | `artisan-studio:review` waits while you edit and shows what you have
-    | touched. This is how often it asks git — cheap enough to be frequent
-    | (tens of milliseconds on a large repository), slow enough to be invisible.
+    | A task is reviewed on the Workflows tab of `php artisan studio`. Starting
+    | a review opens the files the task changed in your editor: the one chosen
+    | in Settings, or else the one whose terminal the studio runs in.
     |
     */
 
     'review' => [
-        'poll_seconds' => (int) env('ARTISAN_STUDIO_REVIEW_POLL', 10),
         'editor' => env('ARTISAN_STUDIO_EDITOR'),
     ],
 
@@ -179,6 +178,26 @@ return [
         'width' => 40,
 
         'from' => 130,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Workflows
+    |--------------------------------------------------------------------------
+    |
+    | Which theme colour each workflow status is shown in.
+    |
+    */
+
+    'workflows' => [
+        'statuses' => [
+            'Active' => 'blue',
+            'Planning' => 'cyan',
+            'Queued' => 'cyan',
+            'Paused' => 'amber',
+            'Pending' => 'amber',
+            'Completed' => 'green',
+        ],
     ],
 
     /*
