@@ -19,6 +19,8 @@ final class TestRun
 
     private const int WRAP = 96;
 
+    private const int SHOWN_LINES = 12;
+
     private ?InvokedProcess $running = null;
 
     private string $report = '';
@@ -179,6 +181,7 @@ final class TestRun
             $this->running !== null => "Running {$count} on your machine…",
             $this->outcome === null => "Prover wrote {$count} for this build. Running them here runs only those files, and the results go to Guard.",
             $this->sent => 'Sent to the studio. Guard checks the build next.',
+            $this->didNotRun() => 'Pest stopped before running a single test. Its last lines are below: fix what it says, then run them again.',
             $this->outcome['passed'] => 'They pass. Save your changes to send them, with why you made them.',
             default => 'Fix them in your editor, then run them again. Nothing is committed while they fail.',
         };
@@ -188,6 +191,10 @@ final class TestRun
     {
         if ($this->outcome === null) {
             return trans_choice(':count file|:count files', count($this->files()));
+        }
+
+        if ($this->didNotRun()) {
+            return "Test run {$this->runs} · did not run";
         }
 
         return "Test run {$this->runs} · {$this->outcome['cases']['passed']} passed · {$this->outcome['cases']['failed']} failed";
@@ -213,6 +220,10 @@ final class TestRun
      */
     private function rows(): array
     {
+        if ($this->didNotRun()) {
+            return $this->whatPestSaid();
+        }
+
         if ($this->outcome === null || $this->outcome['results'] === []) {
             return array_map(fn (string $file): array => [
                 'mark' => $this->running === null ? '·' : '…',
@@ -231,6 +242,28 @@ final class TestRun
                     ->all(),
             ])
             ->all());
+    }
+
+    /**
+     * @return list<array{mark: string, colour: string, line: string, text: string}>
+     */
+    private function whatPestSaid(): array
+    {
+        $lines = collect(explode("\n", (string) preg_replace('/\e\[[0-9;?]*[A-Za-z]/', '', $this->output)))
+            ->map(fn (string $line): string => trim($line))
+            ->filter()
+            ->take(-self::SHOWN_LINES)
+            ->whenEmpty(fn ($lines) => $lines->push('Pest printed nothing.'));
+
+        return array_values($lines
+            ->flatMap(fn (string $line): array => explode("\n", wordwrap($line, self::WRAP, "\n", true)))
+            ->map(fn (string $line): array => ['mark' => '', 'colour' => 'dim', 'line' => $line, 'text' => 'rose'])
+            ->all());
+    }
+
+    private function didNotRun(): bool
+    {
+        return $this->running === null && $this->outcome !== null && $this->outcome['results'] === [];
     }
 
     private function start(): string

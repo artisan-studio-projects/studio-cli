@@ -56,7 +56,7 @@ it('reads each file\'s result from the report, counting a dataset\'s cases once'
               <testcase name="it is skipped"><skipped/></testcase>
             </testsuite>
             <testsuite name="Tests\Feature\CheckoutTest" file="tests/Feature/CheckoutTest.php" tests="1" failures="0" errors="1" skipped="0">
-              <testcase name="it checks out"><error type="Error">Call to undefined method Cart::total()
+              <testcase name="it checks out"><error type="Error">it checks outCall to undefined method Cart::total()
         at app/Cart.php:12</error></testcase>
             </testsuite>
           </testsuite>
@@ -77,6 +77,16 @@ it('says the run failed when Pest left no report behind', function (): void {
     expect((new TestSuite($this->folder))->read($this->folder.'/missing.xml', false))
         ->toBe(['passed' => false, 'results' => [], 'cases' => ['passed' => 0, 'failed' => 0]]);
 });
+
+it('says the run failed, quietly, when Pest left an empty or broken report', function (string $contents): void {
+    file_put_contents($this->folder.'/report.xml', $contents);
+
+    expect((new TestSuite($this->folder))->read($this->folder.'/report.xml', true))
+        ->toBe(['passed' => false, 'results' => [], 'cases' => ['passed' => 0, 'failed' => 0]]);
+})->with([
+    'empty' => [''],
+    'cut off' => ['<?xml version="1.0"?><testsuites><testsuite name="Tests" file="tests/Feature/CartTest.php"'],
+]);
 
 it('only ever runs files under tests/', function (): void {
     expect((new TestSuite($this->folder))->runnable(['tests/Feature/CartTest.php', 'app/Models/Cart.php', 'tests/../.env', 'tests/Feature/Cart Test.php']))

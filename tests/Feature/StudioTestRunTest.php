@@ -153,7 +153,7 @@ it('runs the tests Prover wrote on the build\'s branch and sends the results bac
         ->toMatch('/⏎ Switch to sami\/checkout and run tests\s+esc  Not now/u')
         ->and($started)->toBe('Running the tests on sami/checkout.')
         ->and(($this->git)($this->work, 'rev-parse', '--abbrev-ref', 'HEAD'))->toBe('sami/checkout')
-        ->and($this->ran[0])->toBe(['php', 'artisan', 'test', '--compact', '--without-tty', '--log-junit', $this->ran[0][6], 'tests/Feature/CartTest.php', 'tests/Unit/CartTotalTest.php'])
+        ->and($this->ran[0])->toBe(['php', 'artisan', 'test', '--without-tty', '--compact', '--log-junit', $this->ran[0][6], 'tests/Feature/CartTest.php', 'tests/Unit/CartTotalTest.php'])
         ->and($sentWhileRed)->toBeNull()
         ->and($red)->toContain('Test run 1 · 4 passed · 1 failed')->toContain('✗  tests/Feature/CartTest.php')->toContain('✓  tests/Unit/CartTotalTest.php')
         ->toContain('it totals the cart: Failed asserting that 10 is identical to 12.')
@@ -172,6 +172,21 @@ it('runs the tests Prover wrote on the build\'s branch and sends the results bac
         ->and($finished)->toContain('Sent to the studio. Guard checks the build next.')
         ->and(file_exists($this->ran[0][6]))->toBeFalse()
         ->and(collect(app(ActivityLog::class)->entries('7'))->pluck('label')->all())->toBe(['Tests failed', 'Running the tests']);
+});
+
+it('shows what Pest said when it stopped before running any test', function (): void {
+    Processes::fake(fn (): mixed => Processes::result(output: "PHPUnit 13.3.0 by Sebastian Bergmann and contributors.\n\e[31mUnknown option \"--nope\".\e[0m", exitCode: 1));
+    ($this->press)("\n", "\e[B", "\n", "\n", "\n");
+    ($this->tick)();
+    $stopped = ($this->screen)();
+
+    expect($stopped)->toContain('Test run 1 · did not run')
+        ->toContain('Pest stopped before running a single test.')
+        ->toContain('Unknown option "--nope".')
+        ->not->toContain('0 passed · 0 failed')
+        ->not->toContain('Fix them in your editor')
+        ->toMatch('/Run again.*Send as failing/su')
+        ->and(($this->sent)())->toBeNull();
 });
 
 it('will not run tests that would use the developer\'s own database', function (): void {

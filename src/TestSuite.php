@@ -33,7 +33,7 @@ class TestSuite
     {
         return Process::path($this->root)
             ->timeout(self::TIMEOUT)
-            ->start(['php', 'artisan', 'test', '--compact', '--without-tty', '--log-junit', $report, ...$this->runnable($files)]);
+            ->start(['php', 'artisan', 'test', '--without-tty', '--compact', '--log-junit', $report, ...$this->runnable($files)]);
     }
 
     /**
@@ -55,7 +55,7 @@ class TestSuite
      */
     public function read(string $report, bool $succeeded): array
     {
-        $xml = is_file($report) ? simplexml_load_file($report) : false;
+        $xml = is_file($report) && filesize($report) > 0 ? simplexml_load_file($report, SimpleXMLElement::class, LIBXML_NOERROR | LIBXML_NOWARNING) : false;
         $suites = $xml === false ? [] : ($xml->xpath('//testsuite[@file and not(ancestor::testsuite[@file])]') ?: []);
 
         $results = array_values(array_map($this->fileResult(...), $suites));
@@ -63,7 +63,7 @@ class TestSuite
         $ran = array_sum(array_map(fn (SimpleXMLElement $suite): int => (int) $suite['tests'] - (int) $suite['skipped'], $suites));
 
         return [
-            'passed' => $succeeded && $failed === 0,
+            'passed' => $succeeded && $failed === 0 && $results !== [],
             'results' => $results,
             'cases' => ['passed' => max(0, $ran - $failed), 'failed' => $failed],
         ];
@@ -75,7 +75,7 @@ class TestSuite
     private function fileResult(SimpleXMLElement $suite): array
     {
         $failures = array_values(array_map(
-            fn (SimpleXMLElement $case): string => mb_substr(trim((string) $case['name'].': '.Str::before(trim((string) ($case->failure ?? $case->error)), "\n")), 0, 300),
+            fn (SimpleXMLElement $case): string => mb_substr(trim((string) $case['name'].': '.Str::chopStart(Str::before(trim((string) ($case->failure ?? $case->error)), "\n"), (string) $case['name'])), 0, 300),
             $suite->xpath('.//testcase[failure or error]') ?: [],
         ));
 
