@@ -5,14 +5,22 @@ declare(strict_types=1);
 namespace ArtisanStudio\StudioCli;
 
 use Closure;
+use Illuminate\Contracts\Process\InvokedProcess;
 use Illuminate\Support\Facades\Process;
 use RuntimeException;
+use Throwable;
 
 class EventStream
 {
     private string $buffer = '';
 
     private ?string $lastEventId = null;
+
+    private ?InvokedProcess $listening = null;
+
+    private ?string $listeningHeaders = null;
+
+    private string $failure = '';
 
     public function __construct(
         private readonly string $url,
@@ -44,6 +52,68 @@ class EventStream
         if (! $result->successful()) {
             throw new RuntimeException(trim($result->errorOutput()) ?: 'the connection failed');
         }
+    }
+
+    /** @param  Closure(array<string, mixed>): void  $onEvent */
+    public function open(Closure $onEvent): void
+    {
+        $this->close();
+        $this->buffer = '';
+        $this->failure = '';
+        $this->listeningHeaders = $this->headerFile();
+
+        $this->listening = Process::forever()->start(
+            $this->command($this->listeningHeaders),
+            function (string $type, string $output) use ($onEvent): void {
+                if ($type === 'out') {
+                    $this->consume($output, $onEvent);
+                }
+            },
+        );
+    }
+
+    public function pump(): bool
+    {
+        if ($this->listening === null) {
+            return false;
+        }
+
+        if ($this->listening->running()) {
+            return true;
+        }
+
+        $result = $this->listening->wait();
+        $this->failure = $result->successful() ? 'the studio closed the connection' : (trim($result->errorOutput()) ?: 'the connection failed');
+        $this->forgetListening();
+
+        return false;
+    }
+
+    public function failure(): string
+    {
+        return $this->failure;
+    }
+
+    public function close(): void
+    {
+        try {
+            if ($this->listening?->running()) {
+                $this->listening->signal(15);
+            }
+        } catch (Throwable) {
+        }
+
+        $this->forgetListening();
+    }
+
+    private function forgetListening(): void
+    {
+        if ($this->listeningHeaders !== null) {
+            @unlink($this->listeningHeaders);
+        }
+
+        $this->listening = null;
+        $this->listeningHeaders = null;
     }
 
     private function headerFile(): string

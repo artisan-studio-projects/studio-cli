@@ -10,10 +10,13 @@ use ArtisanStudio\StudioCli\Saloon\Requests\ListPresenceStatesRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\ListProjectsRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\ListWorkflowsRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\NextCommandRequest;
+use ArtisanStudio\StudioCli\Saloon\Requests\ShowSnapshotRequest;
+use ArtisanStudio\StudioCli\Saloon\Requests\ShowWorkflowRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\SubmitReviewRequest;
 use ArtisanStudio\StudioCli\Saloon\StudioConnector;
 use Closure;
 use RuntimeException;
+use Saloon\Http\Request;
 use Throwable;
 
 class Studio
@@ -55,6 +58,36 @@ class Studio
         }
 
         return $response->json('projects', []);
+    }
+
+    /**
+     * @return array<mixed>|null
+     */
+    public function snapshot(): ?array
+    {
+        return $this->fetch(new ShowSnapshotRequest($this->project()));
+    }
+
+    /**
+     * @return array<mixed>|null
+     */
+    public function workflow(string $workflow): ?array
+    {
+        return $this->fetch(new ShowWorkflowRequest($this->project(), $workflow));
+    }
+
+    /**
+     * @return array<mixed>|null
+     */
+    private function fetch(Request $request): ?array
+    {
+        try {
+            $response = $this->connector()->send($request);
+        } catch (Throwable) {
+            return null;
+        }
+
+        return $response->successful() ? $response->json() : null;
     }
 
     /** @return list<array<string, mixed>> */
@@ -147,6 +180,11 @@ class Studio
                 ? ['url' => $desktop['url'], 'updated' => is_numeric($desktop['updated'] ?? null) ? (int) $desktop['updated'] : null]
                 : null,
         ];
+    }
+
+    public function listener(): EventStream
+    {
+        return new EventStream($this->streamUrl(), $this->token());
     }
 
     private function streamUrl(): string

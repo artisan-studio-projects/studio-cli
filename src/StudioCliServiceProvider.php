@@ -9,7 +9,11 @@ use ArtisanStudio\StudioCli\Console\BuildPresenceCommand;
 use ArtisanStudio\StudioCli\Console\LinkCommand;
 use ArtisanStudio\StudioCli\Console\ReviewCommand;
 use ArtisanStudio\StudioCli\Console\WatchCommand;
+use ArtisanStudio\StudioCli\Dashboard\LiveSnapshots;
+use ArtisanStudio\StudioCli\Dashboard\SnapshotSource;
+use ArtisanStudio\StudioCli\Events\StudioReported;
 use Illuminate\Foundation\DevCommands;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 
 class StudioCliServiceProvider extends ServiceProvider
@@ -25,6 +29,10 @@ class StudioCliServiceProvider extends ServiceProvider
         $this->app->singleton(LocalChanges::class, fn (): LocalChanges => new LocalChanges($this->app->basePath()));
 
         $this->app->singleton(Errand::class, fn (): Errand => new Errand($this->app->basePath()));
+
+        $this->app->singleton(ActivityLog::class);
+
+        $this->app->singleton(SnapshotSource::class, LiveSnapshots::class);
 
         $this->app->singleton(Presence::class);
     }
@@ -47,7 +55,16 @@ class StudioCliServiceProvider extends ServiceProvider
             __DIR__.'/../config/studio-cli.php' => config_path('studio-cli.php'),
         ], ['studio-cli', 'studio-cli-config']);
 
+        Event::listen(StudioReported::class, $this->refetchWhenTheStudioChanges(...));
+
         $this->registerDevTab();
+    }
+
+    private function refetchWhenTheStudioChanges(StudioReported $reported): void
+    {
+        if (in_array($reported->event['type'] ?? null, ['changed', 'checkpoint'], true)) {
+            $this->app->make(SnapshotSource::class)->forget();
+        }
     }
 
     private function registerDevTab(): void

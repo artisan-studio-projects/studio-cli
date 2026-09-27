@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace ArtisanStudio\StudioCli\Tests;
 
+use ArtisanStudio\StudioCli\Dashboard\SampleSnapshots;
+use ArtisanStudio\StudioCli\Dashboard\SnapshotSource;
 use ArtisanStudio\StudioCli\StudioCliServiceProvider;
 use Illuminate\Foundation\Application;
 use Orchestra\Testbench\TestCase as Orchestra;
@@ -17,6 +19,13 @@ abstract class TestCase extends Orchestra
             SaloonServiceProvider::class,
             StudioCliServiceProvider::class,
         ];
+    }
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->app->instance(SnapshotSource::class, new SampleSnapshots);
     }
 
     /**

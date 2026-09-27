@@ -29,8 +29,11 @@ return [
     | Watching
     |--------------------------------------------------------------------------
     |
-    | The stream is held open and pushes as artisans work, so nothing here is a
-    | poll interval. These are what to do when the connection drops.
+    | A stream is held open to the studio. It carries what the artisans do,
+    | and says when anything in the project changes, so every tab fetches
+    | again the moment it does. `poll_seconds` is only the fallback, for when
+    | the stream is down; r fetches straight away. The rest is what to do
+    | when the connection drops.
     |
     | ★ NEVER FAIL SILENTLY. `artisan dev` restarts a crashed tab on its own, so
     | a watcher that exits quietly comes straight back and looks like it is
@@ -39,6 +42,8 @@ return [
     */
 
     'watch' => [
+        'poll_seconds' => (int) env('ARTISAN_STUDIO_POLL', 30),
+
         'reconnect_seconds' => (int) env('ARTISAN_STUDIO_RECONNECT', 5),
         'max_reconnect_seconds' => (int) env('ARTISAN_STUDIO_RECONNECT_MAX', 60),
     ],
