@@ -143,20 +143,57 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Tabs
+    |--------------------------------------------------------------------------
+    |
+    | Every tab in `php artisan studio` comes from a command, and any command
+    | that provides a tab shows up on its own. Running one of them opens the
+    | studio on its tab. List command names under `order` to put them in a
+    | particular order, and under `hidden` to leave any out.
+    |
+    */
+
+    'tabs' => [
+        'order' => ['studio:dashboard', 'studio:insights', 'studio:workflows', 'studio:watch'],
+
+        'hidden' => [],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Rail
+    |--------------------------------------------------------------------------
+    |
+    | A column down the right of every tab, for the one command worth keeping
+    | in view whichever tab is open. It appears once the terminal is at least
+    | `from` columns wide, `width` columns across, and takes that command's
+    | tab out of the row while it is there. Narrower, it is a tab again. Set
+    | `command` to null to keep it a tab at any width.
+    |
+    */
+
+    'rail' => [
+        'command' => 'studio:watch',
+
+        'width' => 40,
+
+        'from' => 130,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Dev tab
     |--------------------------------------------------------------------------
     |
-    | Registers the watcher as a tab in `artisan dev`, beside horizon, server,
-    | logs and vite.
-    |
-    | Set to false to keep the command without the tab. You can also leave this
-    | alone and call `DevCommands::except('Artisan Studio')` yourself — a
-    | userland registration outranks this package's either way.
+    | Off by default: `php artisan studio` is where Artisan Studio lives now.
+    | Turn it on to also follow the activity as a tab in `artisan dev`, beside
+    | horizon, server, logs and vite. A userland `DevCommands` registration
+    | outranks this package's either way.
     |
     */
 
     'dev_tab' => [
-        'enabled' => (bool) env('ARTISAN_STUDIO_DEV_TAB', true),
+        'enabled' => (bool) env('ARTISAN_STUDIO_DEV_TAB', false),
 
         'until_linked' => (bool) env('ARTISAN_STUDIO_DEV_TAB_UNLINKED', false),
         'name' => env('ARTISAN_STUDIO_DEV_TAB_NAME', 'Artisan Studio'),

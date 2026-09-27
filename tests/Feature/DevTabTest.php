@@ -2,9 +2,12 @@
 
 declare(strict_types=1);
 
+use ArtisanStudio\StudioCli\Console\StudioCommand;
 use ArtisanStudio\StudioCli\Console\WatchCommand;
 use ArtisanStudio\StudioCli\Saloon\Requests\ListProjectsRequest;
 use ArtisanStudio\StudioCli\Studio;
+use ArtisanStudio\StudioCli\StudioCliServiceProvider;
+use ArtisanStudio\StudioCli\Terminal\ScreenContainer;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Foundation\DevCommands;
 use Saloon\Http\Faking\MockResponse;
@@ -12,74 +15,77 @@ use Saloon\Laravel\Facades\Saloon;
 
 /*
 |--------------------------------------------------------------------------
-| The tab in `artisan dev`
+| The watcher, and the tab in `artisan dev`
 |--------------------------------------------------------------------------
 |
-| A developer already has that window open all day. A separate terminal they
-| have to remember to start is one they will not.
+| `php artisan studio` is where Artisan Studio lives now, with the watcher as
+| its Activity tab. The `artisan dev` tab is still there for anybody who wants
+| it, but only when asked for.
 |
 */
 
-it('puts the watcher in the dev command', function (): void {
-    $names = collect(DevCommands::commands())->pluck('name');
+function watchScreen(): string
+{
+    $watch = app(Kernel::class)->all()[WatchCommand::SIGNATURE];
+    $watch->start();
+    $screen = app(StudioCommand::class)->screen(ScreenContainer::make())->render(120, 30, 'activity');
+    $watch->stop();
 
-    expect($names)->toContain('Artisan Studio');
+    return (string) preg_replace(['/\e\[[0-9;?]*[A-Za-z]/', '/\e\]8;[^;\e]*;[^\e]*\e\\\\/'], '', $screen);
+}
+
+it('leaves artisan dev alone by default, now that php artisan studio is where it lives', function (): void {
+    expect(collect(DevCommands::commands())->pluck('name'))->not->toContain('Artisan Studio');
 });
 
-it('runs the watcher, not some other command', function (): void {
-    $tab = collect(DevCommands::commands())->firstWhere('name', 'Artisan Studio');
-
-    expect($tab['command'])->toContain(WatchCommand::SIGNATURE);
+it('runs the studio on its activity when the dev tab is turned on', function (): void {
+    expect(StudioCliServiceProvider::DEV_TAB_COMMAND)->toBe('studio activity --tab');
 });
 
-it('registers both commands', function (): void {
+it('registers the commands under their studio names, and keeps the old ones working', function (): void {
     $names = array_keys(app(Kernel::class)->all());
 
-    expect($names)->toContain('artisan-studio:watch')
+    expect($names)->toContain('studio')
+        ->and($names)->toContain('studio:dashboard')
+        ->and($names)->toContain('studio:insights')
+        ->and($names)->toContain('studio:watch')
+        ->and($names)->toContain('artisan-studio:watch')
         ->and($names)->toContain('artisan-studio:link');
 });
 
 /**
- * ★ NOT A FAILURE, THOUGH IT IS A WARNING. `artisan dev` restarts a tab whose
- * process exits, so failing here put the same warning on screen every second —
- * a crash loop that reads as the package being broken rather than as something
- * waiting to be set up.
+ * ★ NOT A FAILURE, THOUGH IT IS A WARNING. A tab whose process exits is
+ * restarted, so failing here would put the same warning up every second.
+ * The Activity tab says what is missing instead, and stays open.
  */
-it('says how to link, without failing at somebody', function (): void {
+it('says how to link in the Activity tab, without failing at somebody', function (): void {
     config()->set('studio-cli.token', null);
 
-    $this->artisan(WatchCommand::SIGNATURE)
-        ->expectsOutputToContain('not connected to Artisan Studio yet')
-        ->expectsOutputToContain('artisan-studio:link')
-        ->assertExitCode(0);
+    expect(watchScreen())->toContain('not connected to Artisan Studio yet')
+        ->toContain('Press s for Settings');
+
+    $this->artisan(WatchCommand::SIGNATURE)->assertExitCode(0);
 });
 
 /**
- * ★ A REFUSED TOKEN IS NOT A MISSING ONE. Both leave a tab showing nothing, and
- * telling somebody to run `link` when they already have is how a typo becomes
- * half an hour.
+ * ★ A REFUSED TOKEN IS NOT A MISSING ONE. Telling somebody to link when they
+ * already have is how a typo becomes half an hour.
  */
 it('says when the studio turned the token away', function (): void {
     Saloon::fake([
         ListProjectsRequest::class => MockResponse::make(['message' => 'Unauthenticated.'], 401),
     ]);
 
-    $this->artisan(WatchCommand::SIGNATURE)
-        ->expectsOutputToContain('does not recognise that token')
-        ->expectsOutputToContain('wrong, expired, or from another studio')
-        ->assertExitCode(0);
+    expect(watchScreen())->toContain('does not recognise that token')
+        ->toContain('wrong, expired, or from another studio');
 });
 
 /**
- * ★ A TAB FOR SOMETHING THIS PROJECT DOES NOT USE IS NOISE. Registering
- * regardless was deliberate once — a missing tab reads the same as a broken
- * install — but most projects that get this as somebody else's dependency will
- * never link, and a permanent tab whose only content is a warning is worse than
- * no tab at all.
- *
  * Asserted on the decision rather than on the registry: the tab is registered
  * during boot, and by the time a test runs the application has already booted
  * with whatever configuration it started with.
+ *
+ * @param  array<string, mixed>  $config
  */
 function wouldShowTheTab(array $config): bool
 {
@@ -87,25 +93,23 @@ function wouldShowTheTab(array $config): bool
         config()->set($key, $value);
     }
 
-    return config('studio-cli.dev_tab.enabled', true)
+    return config('studio-cli.dev_tab.enabled', false)
         && (config('studio-cli.dev_tab.until_linked', false) || app(Studio::class)->isLinked());
 }
 
-it('stays out of the dev command until the project is linked', function (): void {
-    expect(wouldShowTheTab(['studio-cli.token' => null]))->toBeFalse();
+it('stays out of artisan dev unless it is turned on', function (): void {
+    expect(wouldShowTheTab([]))->toBeFalse()
+        ->and(wouldShowTheTab(['studio-cli.dev_tab.enabled' => true]))->toBeTrue();
 });
 
-/**
- * Somebody who has just run `composer require` and wants the tab there before
- * linking can have the old behaviour back.
- */
+it('stays out of the dev command until the project is linked', function (): void {
+    expect(wouldShowTheTab(['studio-cli.dev_tab.enabled' => true, 'studio-cli.token' => null]))->toBeFalse();
+});
+
 it('shows before linking when asked to', function (): void {
     expect(wouldShowTheTab([
+        'studio-cli.dev_tab.enabled' => true,
         'studio-cli.token' => null,
         'studio-cli.dev_tab.until_linked' => true,
     ]))->toBeTrue();
-});
-
-it('stays out entirely when somebody turns it off', function (): void {
-    expect(wouldShowTheTab(['studio-cli.dev_tab.enabled' => false]))->toBeFalse();
 });
