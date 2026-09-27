@@ -8,8 +8,8 @@ use ArtisanStudio\StudioCli\Console\AvatarSyncCommand;
 use ArtisanStudio\StudioCli\Console\BuildPresenceCommand;
 use ArtisanStudio\StudioCli\Console\DashboardCommand;
 use ArtisanStudio\StudioCli\Console\InsightsCommand;
-use ArtisanStudio\StudioCli\Console\LinkCommand;
 use ArtisanStudio\StudioCli\Console\ReviewCommand;
+use ArtisanStudio\StudioCli\Console\SettingsCommand;
 use ArtisanStudio\StudioCli\Console\StudioCommand;
 use ArtisanStudio\StudioCli\Console\WatchCommand;
 use ArtisanStudio\StudioCli\Dashboard\LiveSnapshots;
@@ -36,6 +36,10 @@ class StudioCliServiceProvider extends ServiceProvider
 
         $this->app->singleton(Errand::class, fn (): Errand => new Errand($this->app->basePath()));
 
+        $this->app->singleton(Editor::class, fn (): Editor => new Editor($this->app->basePath()));
+
+        $this->app->singleton(EnvFile::class, fn (): EnvFile => new EnvFile($this->app->basePath('.env')));
+
         $this->app->singleton(ActivityLog::class);
 
         $this->app->singleton(Focus::class);
@@ -58,8 +62,8 @@ class StudioCliServiceProvider extends ServiceProvider
             BuildPresenceCommand::class,
             DashboardCommand::class,
             InsightsCommand::class,
-            LinkCommand::class,
             ReviewCommand::class,
+            SettingsCommand::class,
             StudioCommand::class,
             WatchCommand::class,
         ]);

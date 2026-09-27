@@ -49,6 +49,8 @@ it('registers the commands under their studio names, and keeps the old ones work
         ->and($names)->toContain('studio:dashboard')
         ->and($names)->toContain('studio:insights')
         ->and($names)->toContain('studio:watch')
+        ->and($names)->toContain('studio:settings')
+        ->and($names)->toContain('studio:link')
         ->and($names)->toContain('artisan-studio:watch')
         ->and($names)->toContain('artisan-studio:link');
 });

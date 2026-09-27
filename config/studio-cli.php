@@ -61,6 +61,7 @@ return [
 
     'review' => [
         'poll_seconds' => (int) env('ARTISAN_STUDIO_REVIEW_POLL', 10),
+        'editor' => env('ARTISAN_STUDIO_EDITOR'),
     ],
 
     /*
