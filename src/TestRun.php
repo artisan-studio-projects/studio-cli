@@ -12,6 +12,7 @@ use ArtisanStudio\StudioCli\Terminal\Components\Section;
 use ArtisanStudio\StudioCli\Terminal\Components\Text;
 use ArtisanStudio\StudioCli\Terminal\Settings;
 use Illuminate\Contracts\Process\InvokedProcess;
+use Illuminate\Contracts\Process\ProcessResult;
 
 final class TestRun
 {
@@ -21,7 +22,30 @@ final class TestRun
 
     private const int SHOWN_LINES = 12;
 
+    private const array SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
     private ?InvokedProcess $running = null;
+
+    private ?string $current = null;
+
+    /**
+     * @var list<string>
+     */
+    private array $queue = [];
+
+    /**
+     * @var list<array{file: string, passed: bool, summary: ?string, failures: list<string>}>
+     */
+    private array $results = [];
+
+    /**
+     * @var array{passed: int, failed: int}
+     */
+    private array $cases = ['passed' => 0, 'failed' => 0];
+
+    private int $stopped = 0;
+
+    private int $frame = 0;
 
     private string $report = '';
 
@@ -126,24 +150,41 @@ final class TestRun
 
     public function tick(): void
     {
-        if ($this->running === null || $this->running->running()) {
+        if ($this->running === null) {
             return;
         }
 
-        $result = $this->running->wait();
-        $this->running = null;
-        $this->output = $this->tail($result->output().$result->errorOutput());
-        $this->outcome = $this->suite->read($this->report, $result->successful());
+        if ($this->running->running()) {
+            $this->frame++;
+            $this->panel?->refreshState();
 
-        if (is_file($this->report)) {
-            unlink($this->report);
+            return;
         }
+
+        $this->collect($this->running->wait());
+
+        if ($this->queue !== []) {
+            $this->next();
+            $this->panel?->refreshState();
+
+            return;
+        }
+
+        $this->running = null;
+        $this->current = null;
+        $this->outcome = [
+            'passed' => $this->results !== [] && $this->stopped === 0 && collect($this->results)->every(fn (array $result): bool => $result['passed']),
+            'results' => $this->results,
+            'cases' => $this->cases,
+        ];
 
         match (true) {
             ! $this->outcome['passed'] => $this->openTheFailures(),
             $this->changes->sinceTheLastCommit() === [] => $this->deliver(),
             default => null,
         };
+
+        $this->panel?->refreshState();
     }
 
     /**
@@ -189,6 +230,10 @@ final class TestRun
 
     private function aside(): string
     {
+        if ($this->running !== null) {
+            return "Test run {$this->runs} · ".count($this->results).' of '.trans_choice(':count file|:count files', count($this->results) + count($this->queue) + 1);
+        }
+
         if ($this->outcome === null) {
             return trans_choice(':count file|:count files', count($this->files()));
         }
@@ -224,24 +269,37 @@ final class TestRun
             return $this->whatPestSaid();
         }
 
-        if ($this->outcome === null || $this->outcome['results'] === []) {
-            return array_map(fn (string $file): array => [
-                'mark' => $this->running === null ? '·' : '…',
-                'colour' => $this->running === null ? 'dim' : 'blue',
-                'line' => $file,
-                'text' => 'soft',
-            ], $this->files());
-        }
+        $finished = collect($this->results)->keyBy('file');
 
-        return array_values(collect($this->outcome['results'])
-            ->flatMap(fn (array $result): array => [
-                ['mark' => $result['passed'] ? '✓' : '✗', 'colour' => $result['passed'] ? 'green' : 'rose', 'line' => $result['file'], 'text' => 'ink'],
-                ...collect($result['failures'])
-                    ->flatMap(fn (string $failure): array => explode("\n", wordwrap($failure, self::WRAP, "\n", true)))
-                    ->map(fn (string $line): array => ['mark' => '', 'colour' => 'dim', 'line' => '  '.$line, 'text' => 'dim'])
-                    ->all(),
-            ])
+        return array_values(collect($this->files())
+            ->flatMap(fn (string $file): array => $finished->has($file) ? $this->resultRows($finished->get($file)) : [$this->waitingRow($file)])
+            ->merge($finished->except($this->files())->flatMap(fn (array $result): array => $this->resultRows($result)))
             ->all());
+    }
+
+    /**
+     * @param  array{file: string, passed: bool, summary: ?string, failures: list<string>}  $result
+     * @return list<array{mark: string, colour: string, line: string, text: string}>
+     */
+    private function resultRows(array $result): array
+    {
+        return [
+            ['mark' => $result['passed'] ? '✓' : '✗', 'colour' => $result['passed'] ? 'green' : 'rose', 'line' => $result['file'], 'text' => 'ink'],
+            ...collect($result['failures'])
+                ->flatMap(fn (string $failure): array => explode("\n", wordwrap($failure, self::WRAP, "\n", true)))
+                ->map(fn (string $line): array => ['mark' => '', 'colour' => 'dim', 'line' => '  '.$line, 'text' => 'dim'])
+                ->all(),
+        ];
+    }
+
+    /**
+     * @return array{mark: string, colour: string, line: string, text: string}
+     */
+    private function waitingRow(string $file): array
+    {
+        return $file === $this->current
+            ? ['mark' => self::SPINNER[$this->frame % count(self::SPINNER)], 'colour' => 'blue', 'line' => $file, 'text' => 'ink']
+            : ['mark' => '·', 'colour' => 'dim', 'line' => $file, 'text' => 'soft'];
     }
 
     /**
@@ -263,7 +321,47 @@ final class TestRun
 
     private function didNotRun(): bool
     {
-        return $this->running === null && $this->outcome !== null && $this->outcome['results'] === [];
+        return $this->running === null && $this->outcome !== null && $this->stopped === count($this->outcome['results']);
+    }
+
+    private function next(): void
+    {
+        $this->current = (string) array_shift($this->queue);
+        $this->report = sys_get_temp_dir().'/studio-tests-'.bin2hex(random_bytes(8)).'.xml';
+        $this->running = $this->suite->start([$this->current], $this->report);
+    }
+
+    private function collect(ProcessResult $result): void
+    {
+        $said = $result->output().$result->errorOutput();
+        $read = $this->suite->read($this->report, $result->successful());
+        $this->output = $this->tail($this->output."\n".$said);
+
+        if (is_file($this->report)) {
+            unlink($this->report);
+        }
+
+        if ($read['results'] === []) {
+            $this->stopped++;
+            $failure = 'Pest stopped before running it: '.$this->lastLineOf($said);
+            $this->results[] = ['file' => (string) $this->current, 'passed' => false, 'summary' => $failure, 'failures' => [$failure]];
+
+            return;
+        }
+
+        $this->results = [...$this->results, ...$read['results']];
+        $this->cases = [
+            'passed' => $this->cases['passed'] + $read['cases']['passed'],
+            'failed' => $this->cases['failed'] + $read['cases']['failed'],
+        ];
+    }
+
+    private function lastLineOf(string $said): string
+    {
+        return mb_substr((string) collect(explode("\n", (string) preg_replace('/\e\[[0-9;?]*[A-Za-z]/', '', $said)))
+            ->map(fn (string $line): string => trim($line))
+            ->filter()
+            ->last(default: 'it printed nothing.'), 0, 300);
     }
 
     private function start(): string
@@ -287,9 +385,13 @@ final class TestRun
 
         $this->git->forget();
         $this->outcome = null;
+        $this->results = [];
+        $this->cases = ['passed' => 0, 'failed' => 0];
+        $this->stopped = 0;
+        $this->output = '';
+        $this->queue = $files;
         $this->runs++;
-        $this->report = sys_get_temp_dir().'/studio-tests-'.bin2hex(random_bytes(8)).'.xml';
-        $this->running = $this->suite->start($files, $this->report);
+        $this->next();
         $this->log('Running the tests', 'blue', trans_choice(':count test file|:count test files', count($files)));
 
         $aside = $this->changes->setAside($branch);

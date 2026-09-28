@@ -98,7 +98,7 @@ class LocalChanges
      */
     public function scopeOfTheLastCommit(): ?string
     {
-        $subject = trim($this->git(['log', '-1', '--format=%s']));
+        $subject = trim($this->git(['log', '-1', '--first-parent', '--no-merges', '--format=%s']));
 
         return preg_match('/^[a-z]+\(([^)]+)\)!?:/', $subject, $match) === 1 ? $match[1] : null;
     }

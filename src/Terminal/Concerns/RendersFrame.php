@@ -336,14 +336,22 @@ trait RendersFrame
     private function inputLines(Canvas $canvas, Action $action, int $width): array
     {
         $typed = (string) $this->settingsInput;
-        $shown = $action->isSecret() ? str_repeat('•', mb_strlen($typed)) : $typed;
         $room = $width - 7;
+        $masked = str_repeat('•', mb_strlen($typed));
+        $lines = $action->isSecret()
+            ? [mb_strlen($masked) > $room ? '…'.mb_substr($masked, 1 - $room) : $masked]
+            : $canvas->wrap($typed, $room);
+        $last = array_key_last($lines);
 
         return [
             ...array_map(fn (string $line): string => $canvas->span('    '.$line, 'dim'), $canvas->wrap((string) $action->getAsk(), $width - 4)),
-            $canvas->span('    › ', 'cyan', bold: true)
-                .$canvas->span(mb_strlen($shown) > $room ? '…'.mb_substr($shown, 1 - $room) : $shown, 'soft')
-                .$canvas->span(self::CARET, 'cyan'),
+            ...array_map(
+                fn (string $line, int $index): string => $canvas->span($index === 0 ? '    › ' : '      ', 'cyan', bold: true)
+                    .$canvas->span($line, 'soft')
+                    .($index === $last ? $canvas->span(self::CARET, 'cyan') : ''),
+                $lines,
+                array_keys($lines),
+            ),
         ];
     }
 
