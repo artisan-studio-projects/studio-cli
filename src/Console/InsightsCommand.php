@@ -6,6 +6,7 @@ namespace ArtisanStudio\StudioCli\Console;
 
 use ArtisanStudio\StudioCli\Concerns\OpensInStudio;
 use ArtisanStudio\StudioCli\Dashboard\DashboardSnapshot;
+use ArtisanStudio\StudioCli\Dashboard\NotConnected;
 use ArtisanStudio\StudioCli\Dashboard\SnapshotSource;
 use ArtisanStudio\StudioCli\Terminal\Components\Columns\BarColumn;
 use ArtisanStudio\StudioCli\Terminal\Components\Columns\Column;
@@ -28,6 +29,7 @@ class InsightsCommand extends Command implements ProvidesTab
     {
         return $tab->label('Insights')
             ->state(fn (SnapshotSource $source): DashboardSnapshot => $source->snapshot())
+            ->unavailable(fn (NotConnected $notConnected): array => $notConnected->panel())
             ->components([
                 Text::make(fn (DashboardSnapshot $data): string => "Health {$data->health}%")
                     ->colour(fn (DashboardSnapshot $data): string => $data->healthColour())

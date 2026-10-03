@@ -118,6 +118,13 @@ class LocalChanges
         return trim($this->git(['rev-parse', 'HEAD']));
     }
 
+    public function originRepository(): ?string
+    {
+        $url = trim($this->git(['remote', 'get-url', 'origin'], timeout: 5));
+
+        return preg_match('#github\.com[:/]([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?/?$#', $url, $match) === 1 ? $match[1] : null;
+    }
+
     /**
      * Put the developer on the build's branch.
      *

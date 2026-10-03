@@ -336,8 +336,8 @@ it('shows what a developer sees on a brand new project, not linked and nothing s
     Artisan::call('studio', ['tab' => 'workflows', '--fresh' => true, '--once' => true, '--width' => 120, '--height' => 40]);
     $workflows = ($this->visibleText)(Artisan::output());
 
-    expect($dashboard)->toContain('Not scanned yet')
-        ->and($workflows)->toContain('No workflows yet.')
+    expect($dashboard)->toContain("This project isn't linked to Artisan Studio yet.")->toContain('Press s for Settings, then Link with a token.')->not->toContain('Not scanned yet')
+        ->and($workflows)->toContain("This project isn't linked to Artisan Studio yet.")->not->toContain('No workflows yet.')
         ->and($workflows)->not->toContain('Insights dashboard with health trends')
         ->and(app(Studio::class)->isLinked())->toBeFalse();
 });

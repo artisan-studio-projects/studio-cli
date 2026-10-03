@@ -227,6 +227,32 @@ it('says why a token was turned away, in Settings, rather than failing', functio
     expect(($this->drawn)())->toContain('does not recognise that token')->not->toContain('● accepted');
 });
 
+it('marks the token refused and the project unchecked, never linked, when the studio turns it away', function (): void {
+    Saloon::fake([ListProjectsRequest::class => MockResponse::make(['message' => 'Unauthenticated.'], 401)]);
+
+    ($this->press)('s');
+
+    expect(($this->drawn)())->toContain('● refused')->toContain('● not checked')->not->toContain('● linked');
+});
+
+it('says the studio is unreachable when nothing answers', function (): void {
+    Saloon::fake([ListProjectsRequest::class => MockResponse::make()->throw(new RuntimeException('Connection refused'))]);
+
+    ($this->press)('s');
+
+    expect(($this->drawn)())->toContain('● unreachable')->not->toContain('● linked')->not->toContain('● accepted');
+});
+
+it('shows linked and accepted the moment a fresh token replaces a refused one', function (): void {
+    Saloon::fake([ListProjectsRequest::class => MockResponse::make(['message' => 'Unauthenticated.'], 401)]);
+    ($this->press)('s');
+
+    Saloon::fake([ListProjectsRequest::class => MockResponse::make(['projects' => [['slug' => '1', 'name' => 'Artisan Studio', 'repo' => 'acme/studio']]])]);
+    ($this->press)("\n", "\e[200~fresh-token\e[201~", "\n");
+
+    expect(($this->drawn)())->toContain('● linked')->toContain('● accepted')->not->toContain('● refused');
+});
+
 it('goes back a step with Esc, out of a list first and then out of Settings', function (): void {
     ($this->press)('s', "\n", "\e");
     $outOfTheList = ($this->drawn)();

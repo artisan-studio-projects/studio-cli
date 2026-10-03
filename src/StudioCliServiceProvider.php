@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace ArtisanStudio\StudioCli;
 
 use ArtisanStudio\StudioCli\Console\AvatarSyncCommand;
+use ArtisanStudio\StudioCli\Console\BlueprintCommand;
 use ArtisanStudio\StudioCli\Console\BuildPresenceCommand;
 use ArtisanStudio\StudioCli\Console\DashboardCommand;
 use ArtisanStudio\StudioCli\Console\InsightsCommand;
@@ -16,9 +17,11 @@ use ArtisanStudio\StudioCli\Dashboard\LiveSnapshots;
 use ArtisanStudio\StudioCli\Dashboard\SnapshotSource;
 use ArtisanStudio\StudioCli\Events\StudioReported;
 use ArtisanStudio\StudioCli\Terminal\ScreenRequests;
+use Illuminate\Database\Eloquent\ModelInspector;
 use Illuminate\Foundation\DevCommands;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
+use Throwable;
 
 class StudioCliServiceProvider extends ServiceProvider
 {
@@ -42,6 +45,12 @@ class StudioCliServiceProvider extends ServiceProvider
 
         $this->app->singleton(TestSuite::class, fn (): TestSuite => new TestSuite($this->app->basePath()));
 
+        $this->app->singleton(Blueprint::class, fn (): Blueprint => new Blueprint(
+            $this->app->path(),
+            $this->app->getNamespace(),
+            $this->app->make(ModelInspector::class),
+        ));
+
         $this->app->singleton(ActivityLog::class);
 
         $this->app->singleton(Focus::class);
@@ -63,6 +72,7 @@ class StudioCliServiceProvider extends ServiceProvider
 
         $this->commands([
             AvatarSyncCommand::class,
+            BlueprintCommand::class,
             BuildPresenceCommand::class,
             DashboardCommand::class,
             InsightsCommand::class,
@@ -78,6 +88,8 @@ class StudioCliServiceProvider extends ServiceProvider
 
         Event::listen(StudioReported::class, $this->refetchWhenTheStudioChanges(...));
 
+        Event::listen(StudioReported::class, $this->mapTheBlueprintWhenAsked(...));
+
         $this->registerDevTab();
     }
 
@@ -86,6 +98,35 @@ class StudioCliServiceProvider extends ServiceProvider
         if (in_array($reported->event['type'] ?? null, ['changed', 'checkpoint'], true)) {
             $this->app->make(SnapshotSource::class)->forget();
         }
+    }
+
+    private function mapTheBlueprintWhenAsked(StudioReported $reported): void
+    {
+        if (($reported->event['type'] ?? null) !== 'blueprint') {
+            return;
+        }
+
+        try {
+            $models = $this->app->make(Blueprint::class)->map()['models'];
+            $sha = $this->app->make(LocalChanges::class)->currentSha();
+            $sent = $models !== [] && $this->app->make(Studio::class)->submitBlueprint([
+                'commit' => $sha === '' ? null : $sha,
+                'models' => $models,
+            ]) !== null;
+        } catch (Throwable) {
+            $models = [];
+            $sent = false;
+        }
+
+        $this->app->make(ActivityLog::class)->add([
+            'agent' => 'SAMI',
+            'label' => 'Blueprint',
+            'detail' => $sent
+                ? 'Sent the map of '.trans_choice(':count model|:count models', count($models))
+                : 'Could not send the map of your models. Run php artisan studio:blueprint to see why.',
+            'colour' => $sent ? 'green' : 'amber',
+            'kind' => 'blueprint',
+        ]);
     }
 
     private function registerDevTab(): void

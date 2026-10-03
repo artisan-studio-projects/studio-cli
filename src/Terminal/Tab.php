@@ -38,7 +38,16 @@ final class Tab
 
     private ?Closure $closesUsing = null;
 
+    private ?Closure $unavailable = null;
+
     private function __construct(private string $label) {}
+
+    public function unavailable(Closure $panel): self
+    {
+        $this->unavailable = $panel;
+
+        return $this;
+    }
 
     public static function make(string $label = ''): self
     {
@@ -255,6 +264,12 @@ final class Tab
      */
     private function currentComponents(): array
     {
+        $panel = $this->unavailable === null ? [] : (array) Container::getInstance()->call($this->unavailable);
+
+        if ($panel !== []) {
+            return array_values(array_filter($panel, fn (mixed $component): bool => $component instanceof Component));
+        }
+
         return $this->depth() === 0 ? $this->getComponents() : ($this->levels[$this->depth() - 1]['components'] ?? []);
     }
 

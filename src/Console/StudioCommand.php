@@ -8,7 +8,9 @@ use ArtisanStudio\StudioCli\Dashboard\DashboardSnapshot;
 use ArtisanStudio\StudioCli\Dashboard\FreshSnapshots;
 use ArtisanStudio\StudioCli\Dashboard\SampleSnapshots;
 use ArtisanStudio\StudioCli\Dashboard\SnapshotSource;
+use ArtisanStudio\StudioCli\LocalChanges;
 use ArtisanStudio\StudioCli\LocalTime;
+use ArtisanStudio\StudioCli\Studio;
 use ArtisanStudio\StudioCli\Terminal\Concerns\InteractsWithScreen;
 use ArtisanStudio\StudioCli\Terminal\Contracts\HasScreen;
 use ArtisanStudio\StudioCli\Terminal\ScreenContainer;
@@ -37,6 +39,10 @@ class StudioCommand extends Command implements HasScreen
 
         if ($this->option('demo')) {
             $this->laravel->instance(SnapshotSource::class, new SampleSnapshots);
+        }
+
+        if (! $this->option('fresh') && ! $this->option('demo')) {
+            $this->laravel->make(Studio::class)->ping($this->laravel->make(LocalChanges::class)->originRepository());
         }
 
         $tab = $this->argument('tab');

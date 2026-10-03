@@ -6,6 +6,7 @@ namespace ArtisanStudio\StudioCli\Console;
 
 use ArtisanStudio\StudioCli\Concerns\OpensInStudio;
 use ArtisanStudio\StudioCli\Dashboard\DashboardSnapshot;
+use ArtisanStudio\StudioCli\Dashboard\NotConnected;
 use ArtisanStudio\StudioCli\Dashboard\SnapshotSource;
 use ArtisanStudio\StudioCli\Terminal\Components\Card;
 use ArtisanStudio\StudioCli\Terminal\Components\Grid;
@@ -26,6 +27,7 @@ class DashboardCommand extends Command implements ProvidesTab
     {
         return $tab->label('Dashboard')
             ->state(fn (SnapshotSource $source): DashboardSnapshot => $source->snapshot())
+            ->unavailable(fn (NotConnected $notConnected): array => $notConnected->panel())
             ->components([
                 Grid::make([
                     Card::make('Health')

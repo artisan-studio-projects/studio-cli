@@ -11,9 +11,11 @@ use ArtisanStudio\StudioCli\Saloon\Requests\ListPresenceStatesRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\ListProjectsRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\ListWorkflowsRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\NextCommandRequest;
+use ArtisanStudio\StudioCli\Saloon\Requests\PingRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\ShowSnapshotRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\ShowWorkflowRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\StartTaskReviewRequest;
+use ArtisanStudio\StudioCli\Saloon\Requests\SubmitBlueprintRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\SubmitReviewRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\SubmitTestRunRequest;
 use ArtisanStudio\StudioCli\Saloon\StudioConnector;
@@ -24,13 +26,47 @@ use Throwable;
 
 class Studio
 {
+    public const string CONNECTED = 'connected';
+
+    public const string UNLINKED = 'unlinked';
+
+    public const string REFUSED = 'refused';
+
+    public const string FORBIDDEN = 'forbidden';
+
+    public const string MISSING = 'missing';
+
+    public const string UNREACHABLE = 'unreachable';
+
+    public const string UNKNOWN = 'unknown';
+
     private ?string $token = null;
 
     private ?EventStream $stream = null;
 
+    private string $connection = self::UNKNOWN;
+
+    private bool $hasConnected = false;
+
     public function isLinked(): bool
     {
         return filled($this->token()) && filled($this->url());
+    }
+
+    public function connection(): string
+    {
+        return $this->isLinked() ? $this->connection : self::UNLINKED;
+    }
+
+    public function hasConnected(): bool
+    {
+        return $this->hasConnected;
+    }
+
+    private function answered(string $connection): void
+    {
+        $this->connection = $connection;
+        $this->hasConnected = $this->hasConnected || $connection === self::CONNECTED;
     }
 
     public function withToken(string $token): self
@@ -44,7 +80,19 @@ class Studio
     /** @return list<array{slug: string, name: string, repo: string|null}> */
     public function projects(): array
     {
-        $response = $this->connector()->send(new ListProjectsRequest);
+        try {
+            $response = $this->connector()->send(new ListProjectsRequest);
+        } catch (Throwable $unreachable) {
+            $this->answered(self::UNREACHABLE);
+
+            throw $unreachable;
+        }
+
+        $this->answered(match (true) {
+            in_array($response->status(), [401, 403], true) => self::REFUSED,
+            $response->successful() => self::CONNECTED,
+            default => self::UNREACHABLE,
+        });
 
         if ($response->status() === 401 || $response->status() === 403) {
             throw new RuntimeException('The studio does not recognise that token.');
@@ -103,6 +151,27 @@ class Studio
     }
 
     /**
+     * @param  array{commit: ?string, models: array<int, array<string, mixed>>}  $blueprint
+     * @return array<mixed>|null
+     */
+    public function submitBlueprint(array $blueprint): ?array
+    {
+        return $this->fetch(new SubmitBlueprintRequest($this->project(), $blueprint));
+    }
+
+    public function ping(?string $repository): void
+    {
+        if ($repository === null || blank($this->url())) {
+            return;
+        }
+
+        $request = new PingRequest($repository);
+        $request->config()->merge(['timeout' => 3, 'connect_timeout' => 2]);
+
+        rescue(fn () => $this->connector()->send($request), report: false);
+    }
+
+    /**
      * @return array<mixed>|null
      */
     private function fetch(Request $request): ?array
@@ -110,8 +179,17 @@ class Studio
         try {
             $response = $this->connector()->send($request);
         } catch (Throwable) {
+            $this->answered(self::UNREACHABLE);
+
             return null;
         }
+
+        $this->answered(match ($response->status()) {
+            401 => self::REFUSED,
+            403 => self::FORBIDDEN,
+            404 => self::MISSING,
+            default => $response->successful() ? self::CONNECTED : self::UNREACHABLE,
+        });
 
         return $response->successful() ? $response->json() : null;
     }
@@ -223,7 +301,7 @@ class Studio
         return new StudioConnector($this->url(), $this->token());
     }
 
-    private function url(): string
+    public function url(): string
     {
         return (string) config('studio-cli.url');
     }
@@ -233,7 +311,7 @@ class Studio
         return $this->token ?? (string) config('studio-cli.token');
     }
 
-    private function project(): string
+    public function project(): string
     {
         return (string) config('studio-cli.project', '');
     }

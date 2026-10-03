@@ -9,6 +9,7 @@ use ArtisanStudio\StudioCli\BranchStatus;
 use ArtisanStudio\StudioCli\Concerns\AnswersArtisans;
 use ArtisanStudio\StudioCli\Concerns\OpensInStudio;
 use ArtisanStudio\StudioCli\Dashboard\DashboardSnapshot;
+use ArtisanStudio\StudioCli\Dashboard\NotConnected;
 use ArtisanStudio\StudioCli\Dashboard\SampleSnapshots;
 use ArtisanStudio\StudioCli\Dashboard\SnapshotSource;
 use ArtisanStudio\StudioCli\Events\StudioReported;
@@ -76,6 +77,7 @@ class WorkflowsCommand extends Command implements ProvidesTab, RunsInBackground
     {
         return $tab->label('Workflows')
             ->state(fn (SnapshotSource $source): DashboardSnapshot => $source->snapshot())
+            ->unavailable(fn (NotConnected $notConnected): array => $notConnected->panel())
             ->components([
                 Section::make('Workflows')
                     ->aside(fn (DashboardSnapshot $data): string => "{$data->workflowsRunning} running · {$data->workflowsDone} of {$data->workflowsTotal} done")

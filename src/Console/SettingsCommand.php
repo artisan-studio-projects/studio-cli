@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ArtisanStudio\StudioCli\Console;
 
+use ArtisanStudio\StudioCli\Dashboard\SnapshotSource;
 use ArtisanStudio\StudioCli\Editor;
 use ArtisanStudio\StudioCli\EnvFile;
 use ArtisanStudio\StudioCli\Studio;
@@ -48,6 +49,8 @@ class SettingsCommand extends Command implements ProvidesSettings
     private ?array $projects = null;
 
     private ?string $problem = null;
+
+    private string $connection = Studio::UNKNOWN;
 
     public function handle(): int
     {
@@ -157,12 +160,23 @@ class SettingsCommand extends Command implements ProvidesSettings
     {
         $project = collect($this->projects ?? [])->firstWhere('slug', $current);
         $token = (string) config('studio-cli.token');
-        $accepted = $this->problem === null;
+
+        [$projectStatus, $projectColour] = match (true) {
+            $this->connection !== Studio::CONNECTED => ['not checked', 'dim'],
+            $project === null => ['not found', 'rose'],
+            default => ['linked', 'green'],
+        };
+
+        [$tokenStatus, $tokenColour] = match ($this->connection) {
+            Studio::CONNECTED => ['accepted', 'green'],
+            Studio::REFUSED => ['refused', 'rose'],
+            default => ['not checked', 'dim'],
+        };
 
         return [
-            ['label' => 'Project', 'value' => $project === null ? $current : $this->describe($project), 'status' => 'linked', 'colour' => 'green'],
-            ['label' => 'Studio', 'value' => (string) config('studio-cli.url'), 'status' => '', 'colour' => 'dim'],
-            ['label' => 'Token', 'value' => str_repeat('•', 8).mb_substr($token, -4), 'status' => $accepted ? 'accepted' : '', 'colour' => 'green'],
+            ['label' => 'Project', 'value' => $project === null ? $current : $this->describe($project), 'status' => $projectStatus, 'colour' => $projectColour],
+            ['label' => 'Studio', 'value' => (string) config('studio-cli.url'), 'status' => $this->connection === Studio::UNREACHABLE ? 'unreachable' : '', 'colour' => 'rose'],
+            ['label' => 'Token', 'value' => str_repeat('•', 8).mb_substr($token, -4), 'status' => $tokenStatus, 'colour' => $tokenColour],
         ];
     }
 
@@ -228,6 +242,8 @@ class SettingsCommand extends Command implements ProvidesSettings
         config()->set(['studio-cli.token' => $token, 'studio-cli.project' => $project]);
         $this->projects = $projects;
         $this->problem = null;
+        $this->connection = Studio::CONNECTED;
+        app(SnapshotSource::class)->forget();
 
         return 'Linked to '.$this->named($project).'.';
     }
@@ -236,6 +252,7 @@ class SettingsCommand extends Command implements ProvidesSettings
     {
         app(EnvFile::class)->write([self::PROJECT => $project]);
         config()->set('studio-cli.project', $project);
+        app(SnapshotSource::class)->forget();
 
         return 'Switched to '.$this->named($project).'.';
     }
@@ -255,12 +272,16 @@ class SettingsCommand extends Command implements ProvidesSettings
      */
     private function projectsFor(?string $token): array
     {
+        $studio = $token === null ? app(Studio::class) : app(Studio::class)->withToken($token);
+
         try {
-            $projects = ($token === null ? app(Studio::class) : app(Studio::class)->withToken($token))->projects();
+            $projects = $studio->projects();
         } catch (Throwable $refused) {
             $this->problem = $refused->getMessage();
 
             return [];
+        } finally {
+            $this->connection = $token === null ? $studio->connection() : $this->connection;
         }
 
         $this->problem = $projects === [] ? 'That token works, but there are no projects on it.' : null;

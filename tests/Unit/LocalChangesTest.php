@@ -191,3 +191,17 @@ it('catches up with the artisan\'s newest commit on the branch it is already on'
 
     expect(trim($head->getOutput()))->toBe('feat(metrics): @spark created the chart behaviour');
 });
+
+it('reads the GitHub repository the project was cloned from, over ssh or https', function (string $url, ?string $repository): void {
+    (new Process(['git', 'remote', 'add', 'origin', $url], $this->repo))->run();
+
+    expect((new LocalChanges($this->repo))->originRepository())->toBe($repository);
+})->with([
+    'ssh' => ['git@github.com:artisan-studio-projects/artisan-studio.git', 'artisan-studio-projects/artisan-studio'],
+    'https' => ['https://github.com/artisan-studio-projects/artisan-studio', 'artisan-studio-projects/artisan-studio'],
+    'elsewhere' => ['https://gitlab.com/someone/project.git', null],
+]);
+
+it('has no repository to name when there is no origin', function (): void {
+    expect((new LocalChanges($this->repo))->originRepository())->toBeNull();
+});

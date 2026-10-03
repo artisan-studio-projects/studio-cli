@@ -98,6 +98,59 @@ it('asks the studio once, not on every redraw, and again the moment it is told t
     Saloon::assertSentCount(2);
 });
 
+it('says the token was turned away, rather than showing a project full of zeros', function (): void {
+    Saloon::fake([ShowSnapshotRequest::class => MockResponse::make(['message' => 'Unauthenticated.'], 401)]);
+
+    Artisan::call('studio', ['tab' => 'dashboard', '--once' => true, '--width' => 120, '--height' => 30]);
+
+    expect(($this->plain)(Artisan::output()))
+        ->toContain("Artisan Studio doesn't recognise this project's token.")
+        ->toContain('https://studio.test turned away the token')
+        ->toContain('Press s for Settings')
+        ->not->toContain('Health')->not->toContain('0%');
+});
+
+it('says the project is not on the studio, and on which one', function (): void {
+    Saloon::fake([ShowSnapshotRequest::class => MockResponse::make(['message' => 'Not found.'], 404)]);
+
+    Artisan::call('studio', ['tab' => 'workflows', '--once' => true, '--width' => 120, '--height' => 30]);
+
+    expect(($this->plain)(Artisan::output()))->toContain("Project 1 isn't on https://studio.test.")->not->toContain('No workflows yet');
+});
+
+it('says the studio cannot be reached before it has ever answered', function (): void {
+    Saloon::fake([ShowSnapshotRequest::class => MockResponse::make()->throw(new RuntimeException('Connection refused'))]);
+
+    Artisan::call('studio', ['tab' => 'insights', '--once' => true, '--width' => 120, '--height' => 30]);
+
+    expect(($this->plain)(Artisan::output()))->toContain("Can't reach Artisan Studio.")->toContain('Nothing answered at https://studio.test')->not->toContain('Health 0%');
+});
+
+it('keeps the last real numbers when the studio drops out after answering', function (): void {
+    $source = app(SnapshotSource::class);
+    $source->snapshot();
+
+    Saloon::fake([ShowSnapshotRequest::class => MockResponse::make()->throw(new RuntimeException('Connection refused'))]);
+    $source->forget();
+
+    Artisan::call('studio', ['tab' => 'workflows', '--once' => true, '--width' => 120, '--height' => 30]);
+
+    expect(($this->plain)(Artisan::output()))->toContain('Checkout redesign')->not->toContain("Can't reach Artisan Studio.");
+});
+
+it('drops the notice the moment the studio answers again', function (): void {
+    Saloon::fake([ShowSnapshotRequest::class => MockResponse::make(['message' => 'Unauthenticated.'], 401)]);
+    $source = app(SnapshotSource::class);
+    $source->snapshot();
+
+    Saloon::fake([ShowSnapshotRequest::class => MockResponse::make($this->studio)]);
+    $source->forget();
+
+    Artisan::call('studio', ['tab' => 'workflows', '--once' => true, '--width' => 120, '--height' => 30]);
+
+    expect(($this->plain)(Artisan::output()))->toContain('Checkout redesign')->not->toContain("doesn't recognise");
+});
+
 it('asks nothing of a studio this project is not linked to', function (): void {
     config()->set('studio-cli.token', null);
 
