@@ -23,6 +23,12 @@ class StudioCommand extends Command implements HasScreen
 
     public const string SIGNATURE = 'studio';
 
+    public const int PING_EVERY_SECONDS = 15;
+
+    private ?string $repository = null;
+
+    private int $pingedAt = 0;
+
     protected $signature = self::SIGNATURE.'
         {tab? : Open on this tab: dashboard, insights, workflows, activity or settings}
         {--fresh : Show what a developer sees on a brand new project that is not linked yet}
@@ -42,7 +48,8 @@ class StudioCommand extends Command implements HasScreen
         }
 
         if (! $this->option('fresh') && ! $this->option('demo')) {
-            $this->laravel->make(Studio::class)->ping($this->laravel->make(LocalChanges::class)->originRepository());
+            $this->repository = $this->laravel->make(LocalChanges::class)->originRepository();
+            $this->screenTicked();
         }
 
         $tab = $this->argument('tab');
@@ -53,6 +60,22 @@ class StudioCommand extends Command implements HasScreen
     protected function screenRefreshed(): void
     {
         $this->laravel->make(SnapshotSource::class)->forget();
+    }
+
+    protected function screenTicked(): void
+    {
+        if ($this->repository === null || time() - $this->pingedAt < self::PING_EVERY_SECONDS) {
+            return;
+        }
+
+        $studio = $this->laravel->make(Studio::class);
+
+        if ($this->pingedAt > 0 && $studio->isLinked()) {
+            return;
+        }
+
+        $this->pingedAt = time();
+        $studio->ping($this->repository);
     }
 
     public function screen(ScreenContainer $screen): ScreenContainer

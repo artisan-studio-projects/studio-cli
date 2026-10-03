@@ -192,6 +192,7 @@ trait InteractsWithScreen
 
                 $this->handleScreenAction($action);
                 array_map(fn (RunsInBackground $runner) => $runner->tick(), $this->screenRunners);
+                $this->screenTicked();
                 $this->followScreenRequests();
                 $screen->refreshRunningTabs();
 
@@ -220,6 +221,7 @@ trait InteractsWithScreen
 
         while (true) {
             array_map(fn (RunsInBackground $runner) => $runner->tick(), $runners);
+            $this->screenTicked();
             $screen->refreshRunningTabs();
 
             if (time() - $refreshedAt >= $this->screenRefreshSeconds()) {
@@ -346,6 +348,8 @@ trait InteractsWithScreen
     }
 
     protected function screenRefreshed(): void {}
+
+    protected function screenTicked(): void {}
 
     private function followScreenRequests(): void
     {

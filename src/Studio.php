@@ -166,7 +166,7 @@ class Studio
         }
 
         $request = new PingRequest($repository);
-        $request->config()->merge(['timeout' => 3, 'connect_timeout' => 2]);
+        $request->config()->merge(['timeout' => 2, 'connect_timeout' => 1]);
 
         rescue(fn () => $this->connector()->send($request), report: false);
     }
