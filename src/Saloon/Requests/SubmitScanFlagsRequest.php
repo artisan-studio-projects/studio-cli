@@ -9,27 +9,30 @@ use Saloon\Enums\Method;
 use Saloon\Http\Request;
 use Saloon\Traits\Body\HasJsonBody;
 
-class PingRequest extends Request implements HasBody
+class SubmitScanFlagsRequest extends Request implements HasBody
 {
     use HasJsonBody;
 
     protected Method $method = Method::POST;
 
+    /**
+     * @param  array<string, mixed>  $facts
+     */
     public function __construct(
-        private readonly string $repository,
-        private readonly bool $leaving = false,
+        private readonly string $project,
+        private readonly array $facts,
     ) {}
 
     public function resolveEndpoint(): string
     {
-        return '/api/v1/cli/ping';
+        return '/api/v1/projects/'.$this->project.'/scan/flags';
     }
 
     /**
-     * @return array{repository: string, leaving: bool}
+     * @return array<string, mixed>
      */
     protected function defaultBody(): array
     {
-        return ['repository' => $this->repository, 'leaving' => $this->leaving];
+        return $this->facts;
     }
 }

@@ -22,9 +22,18 @@ final class Card extends Component
 
     private string|Closure|null $valueColour = null;
 
+    private ?string $action = null;
+
     public static function make(string|Closure $label): self
     {
         return (new self)->label($label);
+    }
+
+    public function action(string $action): self
+    {
+        $this->action = $action;
+
+        return $this;
     }
 
     public function value(string|Closure $value): self
@@ -52,12 +61,14 @@ final class Card extends Component
         $description = $canvas->span($canvas->fit((string) $this->getDescription($state), $inside), $this->getDescriptionColour($state));
         $side = $canvas->span('│', 'edge');
 
-        return [
+        $lines = [
             $canvas->span('╭'.str_repeat('─', $width - 2).'╮', 'edge'),
             $side.$canvas->centred($heading, $width - 2).$side,
             $side.$canvas->centred($value, $width - 2).$side,
             $side.$canvas->centred($description, $width - 2).$side,
             $canvas->span('╰'.str_repeat('─', $width - 2).'╯', 'edge'),
         ];
+
+        return $this->action === null ? $lines : array_map(fn (string $line): string => $canvas->link($line, Canvas::ACTION.$this->action), $lines);
     }
 }

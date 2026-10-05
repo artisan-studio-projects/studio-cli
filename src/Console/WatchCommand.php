@@ -44,9 +44,9 @@ class WatchCommand extends Command implements ProvidesRail, ProvidesTab, RunsInB
         'summary' => ['Summary', 'blue'],
     ];
 
-    private const array MILESTONES = ['done', 'summary', 'checkpoint'];
+    private const array MILESTONES = ['done', 'summary', 'checkpoint', 'blueprint', 'conventions', 'tools', 'tests'];
 
-    private const array INSIGHTS = ['scan', 'insight', 'convention'];
+    private const array INSIGHTS = ['scan', 'insight', 'convention', 'blueprint', 'conventions', 'tools', 'tests'];
 
     private const string WAITING = 'Nothing yet. Anything its artisans do shows up here as it happens.';
 

@@ -1,0 +1,113 @@
+<?php
+
+declare(strict_types=1);
+
+namespace ArtisanStudio\StudioCli\Scan\Tools;
+
+use Symfony\Component\Process\Process;
+use Throwable;
+
+abstract class Tool
+{
+    public const int MOST_FINDINGS = 2000;
+
+    public const int LONGEST_MESSAGE = 380;
+
+    abstract public function key(): string;
+
+    abstract public function name(): string;
+
+    /**
+     * @return list<string>|null
+     */
+    abstract public function command(string $root): ?array;
+
+    /**
+     * @return list<array{where: string, rule: string, message: string}>|null
+     */
+    abstract public function findings(string $output, string $root): ?array;
+
+    public function timeout(): int
+    {
+        return 600;
+    }
+
+    public function missing(): string
+    {
+        return 'Not installed in this project.';
+    }
+
+    /**
+     * @return array<string, int>|null
+     */
+    public function summary(): ?array
+    {
+        return null;
+    }
+
+    /**
+     * @return array{packages: list<string>, files: array<string, string>, about: string}|null
+     */
+    public function install(): ?array
+    {
+        return null;
+    }
+
+    public function isSetUp(string $root): bool
+    {
+        return $this->command($root) !== null;
+    }
+
+    /**
+     * @return array<mixed>|null
+     */
+    protected function json(string $output): ?array
+    {
+        $start = strpos($output, '{');
+        $decoded = $start === false ? null : json_decode(substr($output, $start), true);
+
+        return is_array($decoded) ? $decoded : null;
+    }
+
+    protected function relative(string $path, string $root): string
+    {
+        $root = rtrim($root, '/').'/';
+
+        return ltrim(str_starts_with($path, $root) ? substr($path, strlen($root)) : $path, '/');
+    }
+
+    /**
+     * @return array{where: string, rule: string, message: string}
+     */
+    protected function finding(string $path, ?int $line, string $rule, string $message): array
+    {
+        $message = trim((string) preg_replace('/\s+/', ' ', $message));
+
+        return [
+            'where' => $path.($line !== null && $line > 0 ? ':'.$line : ''),
+            'rule' => mb_substr(trim($rule) === '' ? $this->key() : trim($rule), 0, 160),
+            'message' => mb_strlen($message) > self::LONGEST_MESSAGE ? mb_substr($message, 0, self::LONGEST_MESSAGE - 1).'…' : $message,
+        ];
+    }
+
+    protected function bin(string $root, string $name): ?string
+    {
+        return is_file($root.'/vendor/bin/'.$name) ? 'vendor/bin/'.$name : null;
+    }
+
+    /**
+     * @param  list<string>  $help
+     */
+    protected function offers(string $root, array $help, string $option): bool
+    {
+        $process = new Process($help, $root, ['PAO_DISABLE' => '1'], timeout: 30);
+
+        try {
+            $process->run();
+        } catch (Throwable) {
+            return false;
+        }
+
+        return $process->isSuccessful() && str_contains($process->getOutput(), $option);
+    }
+}

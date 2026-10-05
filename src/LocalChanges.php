@@ -126,6 +126,19 @@ class LocalChanges
     }
 
     /**
+     * @return list<string>
+     */
+    public function trackedFiles(): array
+    {
+        return collect(['--cached', '--others'])
+            ->flatMap(fn (string $which): array => explode("\0", $this->git(['ls-files', '-z', $which, '--exclude-standard'], timeout: 60)))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
      * Put the developer on the build's branch.
      *
      * Fetched first, because the branch was cut on GitHub and a clone that has

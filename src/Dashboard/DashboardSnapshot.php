@@ -50,6 +50,7 @@ readonly class DashboardSnapshot
         public ?string $insightsUrl,
         public array $workflows,
         public Carbon $takenAt,
+        public bool $healthScored = true,
     ) {}
 
     public static function fresh(?Carbon $at = null): self
@@ -75,6 +76,7 @@ readonly class DashboardSnapshot
             insightsUrl: null,
             workflows: [],
             takenAt: $at ?? Carbon::now(),
+            healthScored: false,
         );
     }
 
@@ -167,6 +169,7 @@ readonly class DashboardSnapshot
                 ])
                 ->all()),
             takenAt: $at,
+            healthScored: (bool) data_get($data, 'health.scored', true),
         );
     }
 
@@ -263,12 +266,18 @@ readonly class DashboardSnapshot
 
     public function healthColour(): string
     {
-        return match ($this->healthLabel) {
-            'Good' => 'green',
-            'Fair' => 'amber',
-            'Not scanned' => 'dim',
+        return match (true) {
+            ! $this->healthScored => 'dim',
+            $this->healthLabel === 'Good' => 'green',
+            $this->healthLabel === 'Fair' => 'amber',
+            $this->healthLabel === 'Not scanned' => 'dim',
             default => 'rose',
         };
+    }
+
+    public function healthValue(): string
+    {
+        return $this->healthScored ? "{$this->health}%" : '—';
     }
 
     public function scanFraction(): float
@@ -276,11 +285,14 @@ readonly class DashboardSnapshot
         return $this->scanFilesTotal > 0 ? $this->scanFilesDone / $this->scanFilesTotal : 0.0;
     }
 
+    public function hasScanned(): bool
+    {
+        return $this->scanFilesTotal > 0 || $this->scannedAgo !== null;
+    }
+
     public function scanLabel(): string
     {
-        return $this->scanStatus
-            .($this->scanFilesTotal > 0 ? ' · '.number_format($this->scanFilesDone).' of '.number_format($this->scanFilesTotal).' files' : '')
-            .($this->scannedAgo === null ? '' : " · {$this->scannedAgo}");
+        return $this->scanStatus.($this->scannedAgo === null ? '' : " · {$this->scannedAgo}");
     }
 
     public function mostOpen(): int

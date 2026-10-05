@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ArtisanStudio\StudioCli\Terminal\Concerns;
 
+use ArtisanStudio\StudioCli\BackgroundTasks;
 use ArtisanStudio\StudioCli\Terminal\Action;
 use ArtisanStudio\StudioCli\Terminal\Canvas;
 use ArtisanStudio\StudioCli\Terminal\Contracts\HasScreen;
@@ -192,7 +193,7 @@ trait InteractsWithScreen
 
                 $this->handleScreenAction($action);
                 array_map(fn (RunsInBackground $runner) => $runner->tick(), $this->screenRunners);
-                $this->screenTicked();
+                $this->tickTheScreen();
                 $this->followScreenRequests();
                 $screen->refreshRunningTabs();
 
@@ -221,7 +222,7 @@ trait InteractsWithScreen
 
         while (true) {
             array_map(fn (RunsInBackground $runner) => $runner->tick(), $runners);
-            $this->screenTicked();
+            $this->tickTheScreen();
             $screen->refreshRunningTabs();
 
             if (time() - $refreshedAt >= $this->screenRefreshSeconds()) {
@@ -350,6 +351,12 @@ trait InteractsWithScreen
     protected function screenRefreshed(): void {}
 
     protected function screenTicked(): void {}
+
+    private function tickTheScreen(): void
+    {
+        Container::getInstance()->make(BackgroundTasks::class)->tick();
+        $this->screenTicked();
+    }
 
     private function followScreenRequests(): void
     {

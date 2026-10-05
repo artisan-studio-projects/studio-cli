@@ -12,6 +12,8 @@ trait ListensToStudio
 {
     private ?EventStream $studioListener = null;
 
+    private ?Studio $studioWatched = null;
+
     private ?Closure $studioHeard = null;
 
     private bool $studioHeardSinceOpen = false;
@@ -28,6 +30,7 @@ trait ListensToStudio
     protected function startListening(Studio $studio, Closure $onEvent): void
     {
         $this->studioListener = $studio->listener();
+        $this->studioWatched = $studio;
         $this->studioHeard = function (array $event) use ($onEvent): void {
             $this->studioHeardSinceOpen = true;
             $onEvent($event);
@@ -52,6 +55,8 @@ trait ListensToStudio
         $this->studioListener?->close();
         $this->studioListener = null;
         $this->studioConnection = '';
+        $this->studioWatched?->sayGoodbye();
+        $this->studioWatched = null;
     }
 
     protected function studioConnection(): string

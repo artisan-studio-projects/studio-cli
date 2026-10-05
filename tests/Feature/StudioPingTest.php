@@ -18,8 +18,16 @@ it('pings the studio with the repository before there is a token, and leaves the
     $studio = app(Studio::class);
     $studio->ping('artisan-studio-projects/artisan-studio');
 
-    Saloon::assertSent(fn (PingRequest $request, $response): bool => $response->getPendingRequest()->body()->all() === ['repository' => 'artisan-studio-projects/artisan-studio']);
+    Saloon::assertSent(fn (PingRequest $request, $response): bool => $response->getPendingRequest()->body()->all() === ['repository' => 'artisan-studio-projects/artisan-studio', 'leaving' => false]);
     expect($studio->hasConnected())->toBeFalse();
+});
+
+it('tells the studio when php artisan studio is closing, so the install step stops ticking', function (): void {
+    Saloon::fake([PingRequest::class => MockResponse::make([], 204)]);
+
+    app(Studio::class)->ping('artisan-studio-projects/artisan-studio', leaving: true);
+
+    Saloon::assertSent(fn (PingRequest $request, $response): bool => $response->getPendingRequest()->body()->all() === ['repository' => 'artisan-studio-projects/artisan-studio', 'leaving' => true]);
 });
 
 it('sends nothing when there is no repository to name', function (): void {

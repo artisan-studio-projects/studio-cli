@@ -51,6 +51,15 @@ afterEach(function (): void {
     exec('rm -rf '.escapeshellarg($this->repo));
 });
 
+it('lists committed files before new ones, so the walk\'s examples come from settled code', function (): void {
+    mkdir($this->repo.'/app/Models', 0755, true);
+    file_put_contents($this->repo.'/app/Models/Draft.php', '<?php // written today');
+    file_put_contents($this->repo.'/.gitignore', "ignored.php\n");
+    file_put_contents($this->repo.'/ignored.php', '<?php');
+
+    expect((new LocalChanges($this->repo))->trackedFiles())->toBe(['app/Livewire/Invites.php', '.gitignore', 'app/Models/Draft.php']);
+});
+
 it('sees nothing when the developer has not touched anything', function (): void {
     expect((new LocalChanges($this->repo))->sinceTheLastCommit())->toBe([])
         ->and((new LocalChanges($this->repo))->isClean())->toBeTrue();

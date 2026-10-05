@@ -15,6 +15,8 @@ use Throwable;
 
 class Blueprint
 {
+    private const string CAST = '/^[A-Za-z0-9_\\\\:,.-]{1,255}$/';
+
     public function __construct(
         private readonly string $appPath,
         private readonly string $namespace,
@@ -22,7 +24,7 @@ class Blueprint
     ) {}
 
     /**
-     * @return array{models: array<int, array{class: string, table: string, columns: array<int, array{name: string, type: string, nullable: bool}>, relationships: array<int, array{name: string, type: string, related: string}>}>, skipped: array<int, string>}
+     * @return array{models: array<int, array{class: string, table: string, columns: array<int, array{name: string, type: string, nullable: bool, cast: ?string, fillable: bool, hidden: bool, unique: bool}>, relationships: array<int, array{name: string, type: string, related: string}>, observers: array<int, array{event: string, observer: string}>}>, skipped: array<int, string>}
      */
     public function map(): array
     {
@@ -51,7 +53,7 @@ class Blueprint
     }
 
     /**
-     * @return array{class: string, table: string, columns: array<int, array{name: string, type: string, nullable: bool}>, relationships: array<int, array{name: string, type: string, related: string}>}|null
+     * @return array{class: string, table: string, columns: array<int, array{name: string, type: string, nullable: bool, cast: ?string, fillable: bool, hidden: bool, unique: bool}>, relationships: array<int, array{name: string, type: string, related: string}>, observers: array<int, array{event: string, observer: string}>}|null
      */
     private function inspect(string $class): ?array
     {
@@ -70,7 +72,19 @@ class Blueprint
                     'name' => (string) $attribute['name'],
                     'type' => $this->typeOf((string) $attribute['type'], is_string($attribute['cast'] ?? null) ? $attribute['cast'] : null),
                     'nullable' => (bool) $attribute['nullable'],
+                    'cast' => is_string($attribute['cast'] ?? null) && preg_match(self::CAST, $attribute['cast']) === 1 ? $attribute['cast'] : null,
+                    'fillable' => (bool) ($attribute['fillable'] ?? false),
+                    'hidden' => (bool) ($attribute['hidden'] ?? false),
+                    'unique' => (bool) ($attribute['unique'] ?? false),
                 ])
+                ->values()
+                ->all(),
+            'observers' => collect($info->observers)
+                ->flatMap(fn (array $listener): array => array_map(
+                    fn (string $observer): array => ['event' => (string) $listener['event'], 'observer' => $observer === 'Closure' ? 'booted()' : Str::before($observer, '@')],
+                    (array) $listener['observer'],
+                ))
+                ->unique(fn (array $listener): string => $listener['event'].$listener['observer'])
                 ->values()
                 ->all(),
             'relationships' => collect($info->relations)

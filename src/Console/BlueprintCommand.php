@@ -7,6 +7,7 @@ namespace ArtisanStudio\StudioCli\Console;
 use ArtisanStudio\StudioCli\Blueprint;
 use ArtisanStudio\StudioCli\LocalChanges;
 use ArtisanStudio\StudioCli\Studio;
+use ArtisanStudio\StudioCli\TaskJournal;
 use Illuminate\Console\Command;
 
 class BlueprintCommand extends Command
@@ -14,19 +15,20 @@ class BlueprintCommand extends Command
     public const string SIGNATURE = 'studio:blueprint';
 
     protected $signature = self::SIGNATURE.'
-        {--json : Print what would be sent, and send nothing}';
+        {--json : Print what would be sent, and send nothing}
+        {--plain : Print one plain line with the outcome}';
 
     protected $description = 'Send Artisan Studio the map of your models: names, tables, column types and relationships, never code or rows';
 
-    public function handle(Blueprint $blueprint, Studio $studio, LocalChanges $changes): int
+    public function handle(Blueprint $blueprint, Studio $studio, LocalChanges $changes, TaskJournal $journal): int
     {
         if (! $this->option('json') && ! $studio->isLinked()) {
-            $this->components->warn('This project is not linked yet. Run php artisan studio:settings, then try again.');
-
-            return self::SUCCESS;
+            return $this->outcome('This project is not linked yet. Run php artisan studio:settings, then try again.', self::SUCCESS);
         }
 
+        $this->step($journal, 'Looking for your models under app/.');
         $mapped = $blueprint->map();
+        $this->step($journal, 'Read the structure of '.trans_choice(':count model|:count models', count($mapped['models'])).' with Laravel\'s model inspector: tables, columns, types and relationships. No rows.');
         $sha = $changes->currentSha();
 
         $payload = [
@@ -40,24 +42,40 @@ class BlueprintCommand extends Command
             return self::SUCCESS;
         }
 
-        if ($mapped['skipped'] !== []) {
+        if ($mapped['skipped'] !== [] && ! $this->option('plain')) {
             $this->components->warn('Could not read '.implode(', ', array_map(class_basename(...), $mapped['skipped'])).', so they are left out.');
         }
 
         if ($mapped['models'] === []) {
-            $this->components->error('No models were found under app/, so there is nothing to send.');
-
-            return self::FAILURE;
+            return $this->outcome('No models were found under app/, so there is nothing to send.', self::FAILURE);
         }
+
+        $this->step($journal, 'Sending the map to the studio: '.number_format(strlen((string) json_encode($payload)) / 1024).' KB of names, tables, column types and relationships.');
 
         if ($studio->submitBlueprint($payload) === null) {
-            $this->components->error('The studio did not take the blueprint. Check php artisan studio:settings, then try again.');
-
-            return self::FAILURE;
+            return $this->outcome('The studio did not take the blueprint. Check php artisan studio:settings, then try again.', self::FAILURE);
         }
 
-        $this->components->info('Sent the map of '.trans_choice(':count model|:count models', count($mapped['models'])).'. SAMI labels them next.');
+        return $this->outcome('Sent the map of '.trans_choice(':count model|:count models', count($mapped['models'])).'. SAMI labels them next.', self::SUCCESS);
+    }
 
-        return self::SUCCESS;
+    private function step(TaskJournal $journal, string $line): void
+    {
+        $journal->note($line);
+
+        if (! $this->option('plain') && ! $this->option('json')) {
+            $this->components->twoColumnDetail($line);
+        }
+    }
+
+    private function outcome(string $line, int $code): int
+    {
+        match (true) {
+            (bool) $this->option('plain') => $this->line($line),
+            $code === self::SUCCESS => $this->components->info($line),
+            default => $this->components->error($line),
+        };
+
+        return $code;
     }
 }

@@ -3,15 +3,19 @@
 declare(strict_types=1);
 
 use ArtisanStudio\StudioCli\ActivityLog;
+use ArtisanStudio\StudioCli\BackgroundTasks;
 use ArtisanStudio\StudioCli\Blueprint;
 use ArtisanStudio\StudioCli\Console\BlueprintCommand;
 use ArtisanStudio\StudioCli\Events\StudioReported;
 use ArtisanStudio\StudioCli\LocalChanges;
 use ArtisanStudio\StudioCli\Saloon\Requests\SubmitBlueprintRequest;
+use ArtisanStudio\StudioCli\Scan\ToolStatus;
 use ArtisanStudio\StudioCli\Tests\Fixtures\Blueprint\Models\Broken;
 use ArtisanStudio\StudioCli\Tests\Fixtures\Blueprint\Models\Customer;
 use ArtisanStudio\StudioCli\Tests\Fixtures\Blueprint\Models\Invoice;
+use ArtisanStudio\StudioCli\Tests\Fixtures\Blueprint\Models\InvoiceStatus;
 use Illuminate\Database\Eloquent\ModelInspector;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Http\PendingRequest;
@@ -42,9 +46,13 @@ it('finds the models, and only the models', function (): void {
 
 it('maps names, plain types and relationships, and leaves out a model it cannot read', function (): void {
     $mapped = $this->blueprint->map();
+    $shapes = array_map(fn (array $model): array => [
+        ...Arr::except($model, ['observers']),
+        'columns' => array_map(fn (array $column): array => Arr::only($column, ['name', 'type', 'nullable']), $model['columns']),
+    ], $mapped['models']);
 
     expect($mapped['skipped'])->toBe([Broken::class])
-        ->and($mapped['models'])->toBe([
+        ->and($shapes)->toBe([
             [
                 'class' => Customer::class,
                 'table' => 'customers',
@@ -73,6 +81,17 @@ it('maps names, plain types and relationships, and leaves out a model it cannot 
                 ],
             ],
         ]);
+});
+
+it('adds what the model itself says about each column: its cast, and whether it is fillable, hidden or unique', function (): void {
+    $invoice = collect($this->blueprint->map()['models'])->firstWhere('class', Invoice::class);
+    $columns = collect($invoice['columns'])->keyBy('name');
+
+    expect($columns['status'])->toMatchArray(['cast' => InvoiceStatus::class, 'fillable' => false, 'hidden' => false])
+        ->and($columns['lines']['cast'])->toBe('array')
+        ->and($columns['id']['unique'])->toBeBool()
+        ->and($invoice['observers'])->toBeArray()
+        ->and(json_encode($invoice))->not->toContain('draft');
 });
 
 it('prints what it would send, and sends nothing', function (): void {
@@ -120,14 +139,71 @@ it('sends nothing from a project that is not linked', function (): void {
     expect(($this->sent)())->toBeNull();
 });
 
-it('maps and sends the blueprint when the studio asks for it down the stream', function (): void {
-    Saloon::fake([SubmitBlueprintRequest::class => MockResponse::make(['accepted' => 2], 202)]);
+function runsInTheBackgroundAt(string $root, int $exit, string $line): BackgroundTasks
+{
+    @mkdir($root, 0755, true);
+    file_put_contents($root.'/artisan', '<?php echo '.var_export($line, true).', PHP_EOL; exit('.$exit.');');
+
+    return app()->instance(BackgroundTasks::class, new BackgroundTasks($root, app(ActivityLog::class)));
+}
+
+function untilBothFinish(BackgroundTasks $tasks): void
+{
+    $until = microtime(true) + 10;
+
+    while (($tasks->isRunning('blueprint') || $tasks->isRunning('conventions')) && microtime(true) < $until) {
+        usleep(20_000);
+    }
+
+    $tasks->tick();
+}
+
+it('maps the blueprint and counts the conventions in the background when the studio asks, saying so at once', function (): void {
+    $tasks = runsInTheBackgroundAt(sys_get_temp_dir().'/studio-asked-'.bin2hex(random_bytes(4)), 0, 'Sent the map of 2 models. SAMI labels them next.');
 
     event(new StudioReported(['type' => 'blueprint', 'kind' => 'project']));
 
-    expect(($this->sent)()?->body()->all()['models'])->toBe($this->blueprint->map()['models'])
-        ->and(app(ActivityLog::class)->ofKinds(['blueprint'])[0])
-        ->toMatchArray(['label' => 'Blueprint', 'detail' => 'Sent the map of 2 models', 'colour' => 'green']);
+    expect(app(ActivityLog::class)->ofKinds(['blueprint'])[0])->toMatchArray(['label' => 'Blueprint', 'detail' => 'Mapping your models…', 'colour' => 'cyan'])
+        ->and(app(ActivityLog::class)->ofKinds(['conventions'])[0])->toMatchArray(['label' => 'Conventions', 'detail' => 'Counting how your project is written…']);
+
+    untilBothFinish($tasks);
+
+    expect(app(ActivityLog::class)->ofKinds(['blueprint'])[0])->toMatchArray(['detail' => 'Sent the map of 2 models. SAMI labels them next.', 'colour' => 'green']);
+});
+
+it('runs the checking tools again when the studio asks for the extra checks picked in the app, keeping the last test run', function (): void {
+    $tasks = runsInTheBackgroundAt(sys_get_temp_dir().'/studio-tools-'.bin2hex(random_bytes(4)), 0, 'Ran your checking tools.');
+    app(ToolStatus::class)->testsFinished(['ran' => true, 'took' => 1000, 'summary' => ['tests' => 10, 'failed' => 0, 'skipped' => 0]]);
+
+    event(new StudioReported(['type' => 'tools', 'kind' => 'project']));
+
+    expect(app(ActivityLog::class)->ofKinds(['tools'])[0])->toMatchArray(['label' => 'Scan tools', 'detail' => 'Running the extra checks you picked…'])
+        ->and(app(ActivityLog::class)->ofKinds(['blueprint']))->toBe([])
+        ->and(app(ToolStatus::class)->tests())->toMatchArray(['tests' => 10]);
+
+    $until = microtime(true) + 10;
+
+    while ($tasks->isRunning('tools') && microtime(true) < $until) {
+        usleep(20_000);
+    }
+
+    $tasks->tick();
+    @unlink(app(ToolStatus::class)->path());
+
+    expect(app(ActivityLog::class)->ofKinds(['tools'])[0])->toMatchArray(['detail' => 'Ran your checking tools.', 'colour' => 'green']);
+});
+
+it('waits for a picked rule to be installed before it runs any tools, so they all run in one go', function (): void {
+    runsInTheBackgroundAt(sys_get_temp_dir().'/studio-picked-'.bin2hex(random_bytes(4)), 0, 'Ran your checking tools.');
+    @unlink(app(ToolStatus::class)->path());
+
+    event(new StudioReported(['type' => 'tools', 'kind' => 'project', 'tools' => ['phpstan']]));
+
+    expect(app(ActivityLog::class)->ofKinds(['tools']))->toBe([])
+        ->and(app(ToolStatus::class)->asks('phpstan'))->toBeTrue()
+        ->and(array_keys(app(ToolStatus::class)->missing()))->toBe(['phpstan']);
+
+    @unlink(app(ToolStatus::class)->path());
 });
 
 it('only maps the blueprint when asked', function (): void {
@@ -140,9 +216,10 @@ it('only maps the blueprint when asked', function (): void {
 });
 
 it('says so in the activity feed when the studio does not take it', function (): void {
-    Saloon::fake([SubmitBlueprintRequest::class => MockResponse::make(['message' => 'Server Error'], 500)]);
+    $tasks = runsInTheBackgroundAt(sys_get_temp_dir().'/studio-refused-'.bin2hex(random_bytes(4)), 1, 'The studio did not take the blueprint.');
 
     event(new StudioReported(['type' => 'blueprint', 'kind' => 'project']));
+    untilBothFinish($tasks);
 
-    expect(app(ActivityLog::class)->ofKinds(['blueprint'])[0])->toMatchArray(['colour' => 'amber']);
+    expect(app(ActivityLog::class)->ofKinds(['blueprint'])[0])->toMatchArray(['detail' => 'The studio did not take the blueprint.', 'colour' => 'amber']);
 });

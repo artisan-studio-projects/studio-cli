@@ -54,7 +54,11 @@ class StudioCommand extends Command implements HasScreen
 
         $tab = $this->argument('tab');
 
-        return $this->showScreen(is_string($tab) ? $tab : null);
+        try {
+            return $this->showScreen(is_string($tab) ? $tab : null);
+        } finally {
+            $this->laravel->make(Studio::class)->ping($this->repository, leaving: true);
+        }
     }
 
     protected function screenRefreshed(): void

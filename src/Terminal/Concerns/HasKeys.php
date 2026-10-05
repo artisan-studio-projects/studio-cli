@@ -91,6 +91,7 @@ trait HasKeys
             self::QUIT,
             $this->showsTabs() ? ['key' => '←→', 'label' => 'Tabs', 'colour' => 'cyan'] : null,
             $tab->isNavigable() ? ['key' => '⏎', 'label' => 'Details', 'colour' => 'cyan', 'optional' => true] : null,
+            ! $tab->isNavigable() && $tab->enterLabel() !== null && $tab->canEnter() ? ['key' => '⏎', 'label' => $tab->enterLabel(), 'colour' => 'amber'] : null,
             $tab->isOpen() ? ['key' => 'esc', 'label' => 'Back', 'colour' => 'amber'] : null,
             ['key' => 'r', 'label' => 'Refresh', 'colour' => 'blue', 'optional' => true],
             $this->openUrl === null ? null : ['key' => 'o', 'label' => 'Open', 'colour' => 'sky', 'optional' => true],

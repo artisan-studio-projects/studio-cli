@@ -40,6 +40,14 @@ final class Tab
 
     private ?Closure $unavailable = null;
 
+    private ?Closure $entersFromTop = null;
+
+    private ?string $enterLabel = null;
+
+    private ?Closure $runsWhen = null;
+
+    private ?Closure $runs = null;
+
     private function __construct(private string $label) {}
 
     public function unavailable(Closure $panel): self
@@ -78,15 +86,38 @@ final class Tab
         return $this;
     }
 
-    public function enters(Closure $panel): self
+    public function enters(Closure $panel, ?string $label = null): self
     {
         $last = array_key_last($this->levels);
 
-        if ($last !== null) {
-            $this->levels[$last]['enters'] = $panel;
+        if ($last === null) {
+            $this->entersFromTop = $panel;
+            $this->enterLabel = $label;
+
+            return $this;
         }
 
+        $this->levels[$last]['enters'] = $panel;
+
         return $this;
+    }
+
+    /**
+     * @param  Closure(mixed): bool  $when
+     * @param  Closure(mixed): mixed  $run
+     */
+    public function entersBy(Closure $when, Closure $run, string $label): self
+    {
+        $this->runsWhen = $when;
+        $this->runs = $run;
+        $this->enterLabel = $label;
+
+        return $this;
+    }
+
+    public function enterLabel(): ?string
+    {
+        return $this->depth() === 0 ? $this->enterLabel : null;
     }
 
     public function closes(Closure $callback): self
@@ -101,14 +132,25 @@ final class Tab
      */
     public function enter(): array
     {
-        $enters = $this->levels[$this->depth() - 1]['enters'] ?? null;
+        if ($this->runsOnEnter()) {
+            ($this->runs)($this->visibleState($this->getState()));
 
-        return $enters === null ? [] : array_values(array_filter((array) $enters($this->visibleState(null)), fn (mixed $group): bool => $group instanceof Settings));
+            return [];
+        }
+
+        $enters = $this->depth() === 0 ? $this->entersFromTop : ($this->levels[$this->depth() - 1]['enters'] ?? null);
+
+        return $enters === null ? [] : array_values(array_filter((array) $enters($this->visibleState($this->depth() === 0 ? $this->getState() : null)), fn (mixed $group): bool => $group instanceof Settings));
     }
 
     public function canEnter(): bool
     {
-        return $this->enter() !== [];
+        return $this->runsOnEnter() || $this->enter() !== [];
+    }
+
+    private function runsOnEnter(): bool
+    {
+        return $this->depth() === 0 && $this->runsWhen !== null && $this->runs !== null && ($this->runsWhen)($this->visibleState($this->getState())) === true;
     }
 
     public function getLabel(): string

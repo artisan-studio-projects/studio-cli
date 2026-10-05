@@ -12,11 +12,19 @@ use ArtisanStudio\StudioCli\Saloon\Requests\ListProjectsRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\ListWorkflowsRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\NextCommandRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\PingRequest;
+use ArtisanStudio\StudioCli\Saloon\Requests\ReportScanToolProgressRequest;
+use ArtisanStudio\StudioCli\Saloon\Requests\SayGoodbyeRequest;
+use ArtisanStudio\StudioCli\Saloon\Requests\ShowConventionDetectorsRequest;
+use ArtisanStudio\StudioCli\Saloon\Requests\ShowScanDetectorsRequest;
+use ArtisanStudio\StudioCli\Saloon\Requests\ShowScanToolsRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\ShowSnapshotRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\ShowWorkflowRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\StartTaskReviewRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\SubmitBlueprintRequest;
+use ArtisanStudio\StudioCli\Saloon\Requests\SubmitConventionFactsRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\SubmitReviewRequest;
+use ArtisanStudio\StudioCli\Saloon\Requests\SubmitScanFlagsRequest;
+use ArtisanStudio\StudioCli\Saloon\Requests\SubmitScanToolResultsRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\SubmitTestRunRequest;
 use ArtisanStudio\StudioCli\Saloon\StudioConnector;
 use Closure;
@@ -159,13 +167,101 @@ class Studio
         return $this->fetch(new SubmitBlueprintRequest($this->project(), $blueprint));
     }
 
-    public function ping(?string $repository): void
+    /**
+     * @return array{checks: array<string, array<string, mixed>>}|null
+     */
+    public function conventionDetectors(): ?array
+    {
+        $detectors = $this->quietly(new ShowConventionDetectorsRequest($this->project()));
+
+        return is_array($detectors['checks'] ?? null) ? $detectors : null;
+    }
+
+    /**
+     * @return array{checks: array<string, array<string, mixed>>}|null
+     */
+    public function scanDetectors(): ?array
+    {
+        $detectors = $this->quietly(new ShowScanDetectorsRequest($this->project()));
+
+        return is_array($detectors['checks'] ?? null) ? $detectors : null;
+    }
+
+    /**
+     * @return list<string>|null
+     */
+    public function scanTools(): ?array
+    {
+        $answer = $this->quietly(new ShowScanToolsRequest($this->project()));
+
+        return is_array($answer['tools'] ?? null) ? array_values(array_filter($answer['tools'], is_string(...))) : null;
+    }
+
+    /**
+     * Tells the studio where a tool is, so the app can follow each rule as it
+     * installs, runs and finishes. Nothing waits on the answer.
+     */
+    public function reportToolProgress(string $tool, string $state, ?string $reason = null): void
+    {
+        $this->quietly(new ReportScanToolProgressRequest($this->project(), $tool, $state, $reason === null ? null : mb_substr($reason, 0, 200)));
+    }
+
+    /**
+     * @param  array<string, mixed>  $results
+     * @return array<mixed>|null
+     */
+    public function submitScanToolResults(array $results): ?array
+    {
+        return $this->quietly(new SubmitScanToolResultsRequest($this->project(), $results));
+    }
+
+    /**
+     * @param  array<string, mixed>  $flags
+     * @return array<mixed>|null
+     */
+    public function submitScanFlags(array $flags): ?array
+    {
+        return $this->quietly(new SubmitScanFlagsRequest($this->project(), $flags));
+    }
+
+    /**
+     * @param  array<string, mixed>  $facts
+     * @return array<mixed>|null
+     */
+    public function submitConventionFacts(array $facts): ?array
+    {
+        return $this->quietly(new SubmitConventionFactsRequest($this->project(), $facts));
+    }
+
+    /**
+     * @return array<mixed>|null
+     */
+    private function quietly(Request $request): ?array
+    {
+        $response = rescue(fn () => $this->connector()->send($request), report: false);
+
+        return $response !== null && $response->successful() ? $response->json() : null;
+    }
+
+    public function ping(?string $repository, bool $leaving = false): void
     {
         if ($repository === null || blank($this->url())) {
             return;
         }
 
-        $request = new PingRequest($repository);
+        $request = new PingRequest($repository, $leaving);
+        $request->config()->merge(['timeout' => 2, 'connect_timeout' => 1]);
+
+        rescue(fn () => $this->connector()->send($request), report: false);
+    }
+
+    public function sayGoodbye(): void
+    {
+        if (! $this->isLinked()) {
+            return;
+        }
+
+        $request = new SayGoodbyeRequest($this->project());
         $request->config()->merge(['timeout' => 2, 'connect_timeout' => 1]);
 
         rescue(fn () => $this->connector()->send($request), report: false);

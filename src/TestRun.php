@@ -22,7 +22,7 @@ final class TestRun
 
     private const int SHOWN_LINES = 12;
 
-    private const array SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+    public const array SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
     private ?InvokedProcess $running = null;
 
