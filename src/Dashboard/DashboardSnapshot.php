@@ -28,6 +28,7 @@ readonly class DashboardSnapshot
     /**
      * @param  list<array{name: string, open: int}>  $rulesets
      * @param  list<array{id: string, name: string, status: string, updated: string, url: ?string}>  $workflows
+     * @param  list<string>  $fixesAsked
      */
     public function __construct(
         public string $project,
@@ -51,6 +52,7 @@ readonly class DashboardSnapshot
         public array $workflows,
         public Carbon $takenAt,
         public bool $healthScored = true,
+        public array $fixesAsked = [],
     ) {}
 
     public static function fresh(?Carbon $at = null): self
@@ -170,6 +172,7 @@ readonly class DashboardSnapshot
                 ->all()),
             takenAt: $at,
             healthScored: (bool) data_get($data, 'health.scored', true),
+            fixesAsked: array_values(array_filter((array) data_get($data, 'fixes.asked', []), is_string(...))),
         );
     }
 

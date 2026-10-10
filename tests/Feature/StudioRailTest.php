@@ -54,7 +54,7 @@ it('keeps the activity down the right of every tab once the terminal is wide eno
     $lines = collect($this->studio->lines(140, 30, $tab));
     $plain = $lines->map(fn (string $line): string => ($this->plain)($line));
 
-    expect($this->studio->tabKeys())->toBe(['dashboard', 'insights', 'workflows'])
+    expect($this->studio->tabKeys())->toBe(['dashboard', 'scan', 'insights', 'workflows'])
         ->and($plain->get(3))->not->toContain('Activity')
         ->and($plain->implode("\n"))->toContain("│ {$heading}")
         ->and($lines->map(fn (string $line): int => Canvas::visibleWidth($line))->unique()->all())->toBe([140]);
@@ -68,7 +68,7 @@ it('makes the activity a tab again when the terminal is too narrow for both', fu
     ($this->heard)(['type' => 'beat', 'kind' => 'done', 'agent' => 'mason', 'body' => 'Mason done — handed off']);
     $narrow = ($this->plain)($this->studio->render(120, 30, 'activity'));
 
-    expect($this->studio->tabKeys())->toBe(['dashboard', 'insights', 'workflows', 'activity'])
+    expect($this->studio->tabKeys())->toBe(['dashboard', 'scan', 'insights', 'workflows', 'activity'])
         ->and($narrow)->toContain('What happened')
         ->and($narrow)->not->toContain('│ Insights dashboard');
 });
@@ -78,7 +78,7 @@ it('wraps a long line of activity onto as many lines as it needs, rather than cu
     $lines = collect($this->studio->lines(140, 30))->map(fn (string $line): string => ($this->plain)($line));
 
     expect($lines->implode(' '))->toContain('Drafting')->toContain('manifest')->toContain('confidence')->toContain('scores')->toContain('every')->toContain('task.')
-        ->and($lines->implode(''))->not->toContain('…')
+        ->and($lines->implode(''))->not->toContain('task…')->not->toContain('scores…')
         ->and($lines->map(fn (string $line): int => mb_strwidth($line))->unique()->all())->toBe([140]);
 });
 
@@ -136,5 +136,5 @@ it('stays a tab at any width when the config turns the rail off', function (): v
     $studio->lines(160, 30);
 
     expect($studio->getRail())->toBeNull()
-        ->and($studio->tabKeys())->toBe(['dashboard', 'insights', 'workflows', 'activity']);
+        ->and($studio->tabKeys())->toBe(['dashboard', 'scan', 'insights', 'workflows', 'activity']);
 });

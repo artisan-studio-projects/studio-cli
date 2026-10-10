@@ -11,6 +11,24 @@ abstract class Component
 {
     use EvaluatesClosures;
 
+    private bool $tight = false;
+
+    /**
+     * Sits directly under the component before it, without the blank line
+     * between them, like a caption under the cards it belongs to.
+     */
+    public function tight(bool $tight = true): static
+    {
+        $this->tight = $tight;
+
+        return $this;
+    }
+
+    public function isTight(): bool
+    {
+        return $this->tight;
+    }
+
     /**
      * @return list<string>
      */

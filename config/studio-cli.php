@@ -154,9 +154,16 @@ return [
     */
 
     'tabs' => [
-        'order' => ['studio:dashboard', 'studio:insights', 'studio:workflows', 'studio:watch'],
+        'order' => ['studio:dashboard', 'studio:scan', 'studio:insights', 'studio:workflows', 'studio:watch'],
 
         'hidden' => [],
+
+        /*
+        | Scan and Insights are in the row only once the app has asked for them:
+        | a scan has begun, or fixes are asked for or on show. Switch off to
+        | always show them.
+        */
+        'only_when_asked' => true,
     ],
 
     /*

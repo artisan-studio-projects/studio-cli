@@ -42,5 +42,6 @@ abstract class TestCase extends Orchestra
         $app['config']->set('studio-cli.url', 'https://studio.test');
         $app['config']->set('studio-cli.token', 'test-token');
         $app['config']->set('studio-cli.project', '1');
+        $app['config']->set('studio-cli.tabs.only_when_asked', false);
     }
 }

@@ -10,6 +10,7 @@ use ArtisanStudio\StudioCli\Concerns\ListensToStudio;
 use ArtisanStudio\StudioCli\Concerns\OpensInStudio;
 use ArtisanStudio\StudioCli\Dashboard\SnapshotSource;
 use ArtisanStudio\StudioCli\Events\StudioReported;
+use ArtisanStudio\StudioCli\Fix\FixLauncher;
 use ArtisanStudio\StudioCli\Focus;
 use ArtisanStudio\StudioCli\LocalTime;
 use ArtisanStudio\StudioCli\Studio;
@@ -44,9 +45,9 @@ class WatchCommand extends Command implements ProvidesRail, ProvidesTab, RunsInB
         'summary' => ['Summary', 'blue'],
     ];
 
-    private const array MILESTONES = ['done', 'summary', 'checkpoint', 'blueprint', 'conventions', 'tools', 'tests'];
+    private const array MILESTONES = ['done', 'summary', 'checkpoint', 'blueprint', 'conventions', 'tools', 'phpstan', 'tests', FixLauncher::TASK];
 
-    private const array INSIGHTS = ['scan', 'insight', 'convention', 'blueprint', 'conventions', 'tools', 'tests'];
+    private const array INSIGHTS = ['scan', 'insight', 'convention', 'blueprint', 'conventions', 'tools', 'phpstan', 'tests', FixLauncher::TASK];
 
     private const string WAITING = 'Nothing yet. Anything its artisans do shows up here as it happens.';
 

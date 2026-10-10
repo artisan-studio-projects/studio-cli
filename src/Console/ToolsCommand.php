@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ArtisanStudio\StudioCli\Console;
 
+use ArtisanStudio\StudioCli\Scan\ScanRules;
 use ArtisanStudio\StudioCli\Scan\Tools\Toolbox;
 use ArtisanStudio\StudioCli\Scan\ToolStatus;
 use ArtisanStudio\StudioCli\Studio;
@@ -36,21 +37,41 @@ class ToolsCommand extends Command
         $status->asked($asked);
 
         $toolbox = new Toolbox;
-        $checks = array_values(array_diff($asked, [TestsCommand::TESTS]));
-        $this->step($journal, 'Asked the studio which tools you switched on: '.($checks === [] ? 'none' : implode(', ', $checks)).'.');
+        $wanted = array_values(array_diff($asked, [TestsCommand::TESTS, TestsCommand::COVERAGE]));
+        $checks = $wanted;
+        $this->step($journal, 'Asked the studio which tools you switched on: '.($wanted === [] ? 'none' : implode(', ', $wanted)).'. They run at the same time.');
+
+        $waited = false;
+
+        while (self::waitsForTheTests($checks) && $status->testsAreRunning()) {
+            $waited || $this->step($journal, 'Your tests are running, so the other checks wait for them: one thing at a time on your machine.');
+            $waited = true;
+            sleep(2);
+        }
 
         $status->running($checks);
         array_map(fn (string $key): mixed => $studio->reportToolProgress($key, 'waiting'), $checks);
 
-        $results = $toolbox->run($checks, function (string $key, string $name, array $result) use ($journal, $studio, $status): void {
+        $commit = $this->commit();
+
+        $results = $toolbox->runTogether($checks, function (string $key, string $name, array $result) use ($journal, $studio, $status, $commit): void {
             $status->ran($key, $result);
+
+            if (! $this->option('json')) {
+                $sent = $studio->submitScanToolResults(['commit' => $commit, 'partial' => true, 'tools' => [$key => $result]]);
+                is_array($sent['grouped'] ?? null) && $status->grouped($sent['grouped']);
+            }
+
             $studio->reportToolProgress($key, $result['ran'] ? 'done' : 'skipped', $result['ran'] ? null : ($result['reason'] ?? null));
             $this->step($journal, $result['ran']
-                ? sprintf('%s found %s in %ss. Read-only: nothing was changed.', $name, count($result['findings'] ?? []) === 1 ? '1 thing' : count($result['findings'] ?? []).' things', round(($result['took'] ?? 0) / 1000, 1))
+                ? sprintf('%s found %s in %ss. Read-only: nothing was changed.', $name, count($result['findings'] ?? []) === 1 ? '1 thing' : number_format(count($result['findings'] ?? [])).' things', round(($result['took'] ?? 0) / 1000, 1))
                 : $name.' was not checked: '.($result['reason'] ?? 'it did not run.'));
-        }, fn (string $key): mixed => $studio->reportToolProgress($key, 'running'));
+        }, function (string $key) use ($studio, $status): void {
+            $status->started($key);
+            $studio->reportToolProgress($key, 'running');
+        });
 
-        $payload = ['commit' => $this->commit(), 'packages' => $toolbox->packages(), 'tools' => $results];
+        $payload = ['commit' => $commit, 'packages' => $toolbox->packages(), 'tools' => $results];
 
         if ($this->option('json')) {
             $this->line((string) json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
@@ -65,12 +86,30 @@ class ToolsCommand extends Command
             return $this->outcome('The studio did not take the results. Check php artisan studio:settings.', self::FAILURE);
         }
 
+        is_array($answer['grouped'] ?? null) && $status->grouped($answer['grouped']);
+
+        if (array_key_exists(PhpStanCommand::PHPSTAN, $results)) {
+            $status->excluded(is_array($answer['excluded'] ?? null) ? array_values($answer['excluded']) : []);
+        }
+
         $ran = count(array_filter($results, fn (array $result): bool => $result['ran']));
-        $missing = array_column($toolbox->missing($checks), 'name');
+        $missing = array_column($toolbox->missing($wanted), 'name');
 
         return $this->outcome(sprintf('Ran %d of %d tools: %d findings sent.', $ran, count($results), (int) ($answer['findings'] ?? 0)).($missing === []
             ? ''
             : ' Not set up yet: '.implode(', ', $missing).'. Press ⏎ on the Dashboard to install them, or run php artisan '.InstallToolsCommand::SIGNATURE.'.'), self::SUCCESS);
+    }
+
+    /**
+     * Whether these checks hold back for a test run: the first stage's own
+     * checks, like Pint, are light enough to run beside the tests, while the
+     * extras wait, so the machine does one heavy thing at a time.
+     *
+     * @param  list<string>  $checks
+     */
+    public static function waitsForTheTests(array $checks): bool
+    {
+        return array_diff($checks, ScanRules::GROUPS[ScanRules::INITIAL]) !== [];
     }
 
     private function commit(): ?string

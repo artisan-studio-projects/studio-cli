@@ -7,10 +7,14 @@ namespace ArtisanStudio\StudioCli;
 use ArtisanStudio\StudioCli\Console\AvatarSyncCommand;
 use ArtisanStudio\StudioCli\Console\BlueprintCommand;
 use ArtisanStudio\StudioCli\Console\BuildPresenceCommand;
+use ArtisanStudio\StudioCli\Console\CheckCommand;
 use ArtisanStudio\StudioCli\Console\ConventionsCommand;
 use ArtisanStudio\StudioCli\Console\DashboardCommand;
+use ArtisanStudio\StudioCli\Console\FixCommand;
 use ArtisanStudio\StudioCli\Console\InsightsCommand;
 use ArtisanStudio\StudioCli\Console\InstallToolsCommand;
+use ArtisanStudio\StudioCli\Console\PhpStanCommand;
+use ArtisanStudio\StudioCli\Console\ScanCommand;
 use ArtisanStudio\StudioCli\Console\SettingsCommand;
 use ArtisanStudio\StudioCli\Console\StudioCommand;
 use ArtisanStudio\StudioCli\Console\TestsCommand;
@@ -20,6 +24,8 @@ use ArtisanStudio\StudioCli\Console\WorkflowsCommand;
 use ArtisanStudio\StudioCli\Dashboard\LiveSnapshots;
 use ArtisanStudio\StudioCli\Dashboard\SnapshotSource;
 use ArtisanStudio\StudioCli\Events\StudioReported;
+use ArtisanStudio\StudioCli\Fix\FixLauncher;
+use ArtisanStudio\StudioCli\Fix\FixProgress;
 use ArtisanStudio\StudioCli\Scan\ScanProgress;
 use ArtisanStudio\StudioCli\Scan\ToolStatus;
 use ArtisanStudio\StudioCli\Scan\Walk;
@@ -32,6 +38,13 @@ use Illuminate\Support\ServiceProvider;
 class StudioCliServiceProvider extends ServiceProvider
 {
     public const string DEV_TAB_COMMAND = StudioCommand::SIGNATURE.' activity --tab';
+
+    /**
+     * What a scan runs in the background, by task.
+     *
+     * @var list<string>
+     */
+    private const array SCAN_TASKS = ['blueprint', 'conventions', 'tools', 'tests', 'coverage', 'phpstan'];
 
     public function register(): void
     {
@@ -69,6 +82,10 @@ class StudioCliServiceProvider extends ServiceProvider
 
         $this->app->singleton(ScanProgress::class, fn (): ScanProgress => new ScanProgress($this->app->basePath()));
 
+        $this->app->singleton(FixLauncher::class, fn (): FixLauncher => new FixLauncher($this->app->make(BackgroundTasks::class), $this->app->basePath()));
+
+        $this->app->singleton(FixProgress::class, fn (): FixProgress => new FixProgress($this->app->basePath()));
+
         $this->app->singleton(ToolStatus::class, fn (): ToolStatus => new ToolStatus($this->app->basePath()));
 
         $this->app->singleton(TaskJournal::class, fn (): TaskJournal => TaskJournal::fromEnvironment());
@@ -96,9 +113,13 @@ class StudioCliServiceProvider extends ServiceProvider
             BuildPresenceCommand::class,
             ConventionsCommand::class,
             DashboardCommand::class,
+            FixCommand::class,
             InsightsCommand::class,
             InstallToolsCommand::class,
+            PhpStanCommand::class,
             SettingsCommand::class,
+            ScanCommand::class,
+            CheckCommand::class,
             StudioCommand::class,
             TestsCommand::class,
             ToolsCommand::class,
@@ -115,6 +136,8 @@ class StudioCliServiceProvider extends ServiceProvider
         Event::listen(StudioReported::class, $this->mapTheBlueprintWhenAsked(...));
 
         Event::listen(StudioReported::class, $this->runTheToolsWhenAsked(...));
+
+        Event::listen(StudioReported::class, $this->stopTheScanWhenReset(...));
 
         $this->registerDevTab();
     }
@@ -135,15 +158,81 @@ class StudioCliServiceProvider extends ServiceProvider
         $this->app->make(ToolStatus::class)->forget();
 
         $tasks = $this->app->make(BackgroundTasks::class);
+        $tasks->stop(self::SCAN_TASKS);
         $tasks->start('blueprint', 'Blueprint', 'Mapping your models…', [BlueprintCommand::SIGNATURE]);
         $tasks->start('conventions', 'Conventions', 'Counting how your project is written…', [ConventionsCommand::SIGNATURE]);
-        $tasks->start('tools', 'Scan tools', 'Running your project’s own checking tools, read-only…', [ToolsCommand::SIGNATURE], then: [
-            'key' => 'tests',
-            'label' => 'Your tests',
-            'working' => 'Checking whether you switched your tests on…',
-            'command' => [TestsCommand::SIGNATURE],
-            'timeout' => TestsCommand::TIMEOUT,
-        ]);
+        $tasks->start('tests', 'Your tests', 'Checking whether you switched your tests on…', [TestsCommand::SIGNATURE], timeout: TestsCommand::TIMEOUT);
+        $tasks->start('tools', 'Scan tools', 'Running your project’s own checking tools, read-only…', [ToolsCommand::SIGNATURE]);
+    }
+
+    /**
+     * When the developer resets the scan in the app, whatever this machine is
+     * still running for it stops, and what it kept of it is dropped.
+     */
+    private function stopTheScanWhenReset(StudioReported $reported): void
+    {
+        if (($reported->event['type'] ?? null) !== 'reset') {
+            return;
+        }
+
+        $resetAt = is_int($reported->event['reset_at'] ?? null) ? $reported->event['reset_at'] : null;
+        $isNew = $this->isNewReset($resetAt);
+
+        if ($isNew) {
+            $this->stopTheFixRunBefore($resetAt);
+            $this->app->make(BackgroundTasks::class)->stop(self::SCAN_TASKS);
+            $this->app->make(ToolStatus::class)->forget();
+            $this->app->make(ScanProgress::class)->finished();
+            $this->app->make(SnapshotSource::class)->forget();
+        }
+
+        $this->forgetFixesBefore($resetAt, stopped: $isNew);
+    }
+
+    private function stopTheFixRunBefore(?int $resetAt): void
+    {
+        $fixes = $this->app->make(FixProgress::class);
+        $run = $fixes->read();
+
+        if ($run === null || ! $fixes->isAlive() || ($resetAt !== null && $resetAt <= $run['at'] * 1000)) {
+            return;
+        }
+
+        $this->app->make(BackgroundTasks::class)->stop([FixLauncher::TASK]);
+
+        if ($run['pid'] !== null && $fixes->isAlive()) {
+            ProcessTree::stop($run['pid']);
+        }
+    }
+
+    private function forgetFixesBefore(?int $resetAt, bool $stopped = false): void
+    {
+        $fixes = $this->app->make(FixProgress::class);
+        $run = $fixes->read();
+
+        if ($run === null || ($fixes->isAlive() && ! $stopped) || ($resetAt !== null && $resetAt <= $run['at'] * 1000)) {
+            return;
+        }
+
+        $fixes->forget();
+        $this->app->make(SnapshotSource::class)->forget();
+    }
+
+    private function isNewReset(?int $resetAt): bool
+    {
+        if ($resetAt === null) {
+            return true;
+        }
+
+        $handled = sys_get_temp_dir().'/studio-reset-'.hash('xxh128', $this->app->basePath()).'.txt';
+
+        if ($resetAt <= (int) @file_get_contents($handled)) {
+            return false;
+        }
+
+        file_put_contents($handled, (string) $resetAt);
+
+        return true;
     }
 
     private function runTheToolsWhenAsked(StudioReported $reported): void
@@ -158,13 +247,20 @@ class StudioCliServiceProvider extends ServiceProvider
         if ($tools !== []) {
             $status->asked($tools);
             $status->pick($tools);
+            $this->app->make(ScreenRequests::class)->show(ScanCommand::TAB);
+        }
+
+        $tasks = $this->app->make(BackgroundTasks::class);
+
+        if (in_array(TestsCommand::COVERAGE, $tools, true)) {
+            $tasks->start(TestsCommand::COVERAGE_TASK, 'Code coverage', 'Measuring code coverage in the background…', [TestsCommand::SIGNATURE], timeout: TestsCommand::TIMEOUT);
         }
 
         if ($status->missing() !== []) {
             return;
         }
 
-        $this->app->make(BackgroundTasks::class)->start('tools', 'Scan tools', 'Running the extra checks you picked…', [ToolsCommand::SIGNATURE]);
+        $tasks->start('tools', 'Scan tools', 'Running the extra checks you picked…', [ToolsCommand::SIGNATURE]);
     }
 
     private function registerDevTab(): void

@@ -16,6 +16,8 @@ final class Section extends Component
 
     private string|Closure|null $aside = null;
 
+    private string|Closure $asideColour = 'dim';
+
     public static function make(string|Closure $heading): self
     {
         return (new self)->label($heading);
@@ -28,6 +30,13 @@ final class Section extends Component
         return $this;
     }
 
+    public function asideColour(string|Closure $colour): self
+    {
+        $this->asideColour = $colour;
+
+        return $this;
+    }
+
     public function render(Canvas $canvas, int $width, mixed $state): array
     {
         $aside = (string) $this->evaluate($this->aside, $state);
@@ -35,7 +44,7 @@ final class Section extends Component
         $inside = $this->renderComponents($canvas, $width, $state);
 
         return $inside === [] ? [] : [
-            $canvas->spread($canvas->span($label, 'cyan', bold: true), $canvas->span($aside, 'dim'), $width),
+            $canvas->spread($canvas->span($label, 'cyan', bold: true), $canvas->span($aside, (string) $this->evaluate($this->asideColour, $state)), $width),
             ...$inside,
         ];
     }

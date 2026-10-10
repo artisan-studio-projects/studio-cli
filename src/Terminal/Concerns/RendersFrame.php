@@ -386,9 +386,9 @@ trait RendersFrame
     {
         $state = $tab->visibleState($tab->hasOwnState() ? $tab->getState() : $this->getState());
         $body = array_values(collect($tab->visibleComponents())
-            ->map(fn (Component $component): array => array_map(fn (string $line): string => $canvas->row($line, $width), $component->render($canvas, $width - 2 * Canvas::GUTTER, $state)))
-            ->reject(fn (array $block): bool => $block === [])
-            ->reduce(fn (array $lines, array $block): array => $lines === [] ? $block : [...$lines, $canvas->blank($width), ...$block], []));
+            ->map(fn (Component $component): array => ['tight' => $component->isTight(), 'lines' => array_map(fn (string $line): string => $canvas->row($line, $width), $component->render($canvas, $width - 2 * Canvas::GUTTER, $state))])
+            ->reject(fn (array $block): bool => $block['lines'] === [])
+            ->reduce(fn (array $lines, array $block): array => $lines === [] ? $block['lines'] : [...$lines, ...($block['tight'] ? [] : [$canvas->blank($width)]), ...$block['lines']], []));
         $this->recordBodyTargets = $this->recordLines($tab->listLines($canvas, $width - 2 * Canvas::GUTTER), $body);
 
         return $body;

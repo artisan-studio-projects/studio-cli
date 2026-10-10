@@ -16,6 +16,7 @@ use ArtisanStudio\StudioCli\Saloon\Requests\ReportScanToolProgressRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\SayGoodbyeRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\ShowConventionDetectorsRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\ShowScanDetectorsRequest;
+use ArtisanStudio\StudioCli\Saloon\Requests\ShowScanFixesRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\ShowScanToolsRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\ShowSnapshotRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\ShowWorkflowRequest;
@@ -23,6 +24,7 @@ use ArtisanStudio\StudioCli\Saloon\Requests\StartTaskReviewRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\SubmitBlueprintRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\SubmitConventionFactsRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\SubmitReviewRequest;
+use ArtisanStudio\StudioCli\Saloon\Requests\SubmitScanFixReportRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\SubmitScanFlagsRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\SubmitScanToolResultsRequest;
 use ArtisanStudio\StudioCli\Saloon\Requests\SubmitTestRunRequest;
@@ -195,6 +197,28 @@ class Studio
         $answer = $this->quietly(new ShowScanToolsRequest($this->project()));
 
         return is_array($answer['tools'] ?? null) ? array_values(array_filter($answer['tools'], is_string(...))) : null;
+    }
+
+    /**
+     * The rules the developer asked SAMI to fix, by key. Only keys: what fixing
+     * one runs is decided on this machine.
+     *
+     * @return list<string>|null
+     */
+    public function scanFixes(): ?array
+    {
+        $answer = $this->quietly(new ShowScanFixesRequest($this->project()));
+
+        return is_array($answer['fixes'] ?? null) ? array_values(array_filter($answer['fixes'], is_string(...))) : null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $report
+     * @return array<mixed>|null
+     */
+    public function submitScanFixReport(array $report): ?array
+    {
+        return $this->quietly(new SubmitScanFixReportRequest($this->project(), $report));
     }
 
     /**

@@ -51,15 +51,36 @@ final class Grid extends Component
         return $this;
     }
 
+    /**
+     * With a column count, the components fill rows of that many, wrapping
+     * onto the next row, so none is squeezed until its text is cut.
+     */
     public function render(Canvas $canvas, int $width, mixed $state): array
     {
         $components = $this->source === null ? $this->components : array_values((array) $this->evaluate($this->source, $state));
-        $count = max(count($components), $this->columns);
 
         if ($components === []) {
             return [];
         }
 
+        if ($this->columns > 0 && count($components) > $this->columns) {
+            return array_merge(...array_map(
+                fn (array $row, int $index): array => [...($index === 0 ? [] : [$canvas->cell('', $width)]), ...$this->row($canvas, $width, $state, $row)],
+                array_chunk($components, $this->columns),
+                array_keys(array_chunk($components, $this->columns)),
+            ));
+        }
+
+        return $this->row($canvas, $width, $state, $components);
+    }
+
+    /**
+     * @param  list<Component>  $components
+     * @return list<string>
+     */
+    private function row(Canvas $canvas, int $width, mixed $state, array $components): array
+    {
+        $count = max(count($components), $this->columns);
         $each = intdiv($width - $this->gap * ($count - 1), $count);
         $widths = collect(range(0, $count - 1))->map(fn (int $index): int => $index === $count - 1 ? $width - $each * ($count - 1) - $this->gap * ($count - 1) : $each);
         $blocks = collect($components)->map(fn (Component $component, int $index): array => $component->render($canvas, $widths[$index], $state));

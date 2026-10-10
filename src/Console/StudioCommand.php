@@ -4,16 +4,19 @@ declare(strict_types=1);
 
 namespace ArtisanStudio\StudioCli\Console;
 
+use ArtisanStudio\StudioCli\BackgroundTasks;
 use ArtisanStudio\StudioCli\Dashboard\DashboardSnapshot;
 use ArtisanStudio\StudioCli\Dashboard\FreshSnapshots;
 use ArtisanStudio\StudioCli\Dashboard\SampleSnapshots;
 use ArtisanStudio\StudioCli\Dashboard\SnapshotSource;
+use ArtisanStudio\StudioCli\Fix\FixPanel;
 use ArtisanStudio\StudioCli\LocalChanges;
 use ArtisanStudio\StudioCli\LocalTime;
 use ArtisanStudio\StudioCli\Studio;
 use ArtisanStudio\StudioCli\Terminal\Concerns\InteractsWithScreen;
 use ArtisanStudio\StudioCli\Terminal\Contracts\HasScreen;
 use ArtisanStudio\StudioCli\Terminal\ScreenContainer;
+use ArtisanStudio\StudioCli\Terminal\ScreenRequests;
 use ArtisanStudio\StudioCli\Terminal\StudioTabs;
 use Illuminate\Console\Command;
 
@@ -28,6 +31,8 @@ class StudioCommand extends Command implements HasScreen
     private ?string $repository = null;
 
     private int $pingedAt = 0;
+
+    private string $fixesAnnounced = '';
 
     protected $signature = self::SIGNATURE.'
         {tab? : Open on this tab: dashboard, insights, workflows, activity or settings}
@@ -57,8 +62,38 @@ class StudioCommand extends Command implements HasScreen
         try {
             return $this->showScreen(is_string($tab) ? $tab : null);
         } finally {
+            $this->screenEnding();
             $this->laravel->make(Studio::class)->ping($this->repository, leaving: true);
         }
+    }
+
+    /**
+     * The scan this studio started stops with it, whole: a test run left
+     * behind keeps a developer's machine busy long after anyone is looking.
+     */
+    protected function screenEnding(): void
+    {
+        $this->laravel->make(BackgroundTasks::class)->stopAttached();
+    }
+
+    /**
+     * When the developer asks the studio to fix their rules, the terminal turns
+     * to Insights, where SAMI explains what happens next. Once per ask.
+     */
+    private function openInsightsWhenFixesAreAsked(): void
+    {
+        if ($this->repository === null) {
+            return;
+        }
+
+        $fixesAsked = $this->laravel->make(SnapshotSource::class)->snapshot()->fixesAsked;
+        $asked = implode(',', $fixesAsked);
+
+        if ($asked !== '' && $asked !== $this->fixesAnnounced && FixPanel::insights()->fixable($fixesAsked) !== []) {
+            $this->laravel->make(ScreenRequests::class)->show('insights');
+        }
+
+        $this->fixesAnnounced = $asked;
     }
 
     protected function screenRefreshed(): void
@@ -68,6 +103,8 @@ class StudioCommand extends Command implements HasScreen
 
     protected function screenTicked(): void
     {
+        $this->openInsightsWhenFixesAreAsked();
+
         if ($this->repository === null || time() - $this->pingedAt < self::PING_EVERY_SECONDS) {
             return;
         }

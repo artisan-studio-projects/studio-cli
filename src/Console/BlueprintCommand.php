@@ -6,6 +6,7 @@ namespace ArtisanStudio\StudioCli\Console;
 
 use ArtisanStudio\StudioCli\Blueprint;
 use ArtisanStudio\StudioCli\LocalChanges;
+use ArtisanStudio\StudioCli\Scan\ToolStatus;
 use ArtisanStudio\StudioCli\Studio;
 use ArtisanStudio\StudioCli\TaskJournal;
 use Illuminate\Console\Command;
@@ -55,6 +56,8 @@ class BlueprintCommand extends Command
         if ($studio->submitBlueprint($payload) === null) {
             return $this->outcome('The studio did not take the blueprint. Check php artisan studio:settings, then try again.', self::FAILURE);
         }
+
+        app(ToolStatus::class)->blueprintMapped(count($mapped['models']), (int) collect($mapped['models'])->sum(fn (array $model): int => count($model['relationships'])));
 
         return $this->outcome('Sent the map of '.trans_choice(':count model|:count models', count($mapped['models'])).'. SAMI labels them next.', self::SUCCESS);
     }

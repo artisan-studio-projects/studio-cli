@@ -17,4 +17,18 @@ class ShowSnapshotRequest extends Request
     {
         return '/api/v1/projects/'.$this->project.'/snapshot';
     }
+
+    /**
+     * The screen asks while it redraws, so a slow answer is given up on soon and
+     * the last one kept, rather than freezing the counters on it.
+     */
+    public const int TIMEOUT = 4;
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function defaultConfig(): array
+    {
+        return ['timeout' => self::TIMEOUT];
+    }
 }

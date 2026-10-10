@@ -9,8 +9,6 @@ use Throwable;
 
 abstract class Tool
 {
-    public const int MOST_FINDINGS = 2000;
-
     public const int LONGEST_MESSAGE = 380;
 
     abstract public function key(): string;
@@ -23,13 +21,45 @@ abstract class Tool
     abstract public function command(string $root): ?array;
 
     /**
-     * @return list<array{where: string, rule: string, message: string}>|null
+     * @return list<array{where: string, rule: string, message: string, packages?: list<string>, major?: bool}>|null
      */
     abstract public function findings(string $output, string $root): ?array;
+
+    /**
+     * The tool's own fixing run, when it has one.
+     *
+     * @return list<string>|null
+     */
+    public function fixCommand(string $root): ?array
+    {
+        return null;
+    }
+
+    public function canFix(string $root): bool
+    {
+        return $this->fixCommand($root) !== null;
+    }
+
+    /**
+     * Whether a fixing run that exits with an error still changed what it could,
+     * as a checker does when some of what it found is not fixable.
+     */
+    public function fixesEvenWhenFailing(): bool
+    {
+        return false;
+    }
 
     public function timeout(): int
     {
         return 600;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function environment(): array
+    {
+        return [];
     }
 
     public function missing(): string

@@ -12,6 +12,7 @@ use ArtisanStudio\StudioCli\Terminal\Contracts\RunsInBackground;
 use ArtisanStudio\StudioCli\Terminal\ScreenContainer;
 use ArtisanStudio\StudioCli\Terminal\ScreenRequests;
 use ArtisanStudio\StudioCli\Terminal\Theme;
+use ArtisanStudio\StudioCli\Terminal\VendorWatch;
 use Illuminate\Container\Container;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Sleep;
@@ -165,6 +166,8 @@ trait InteractsWithScreen
         $this->redrawOnResize();
         $this->quitOnHangUp();
         $this->output->write("\e[?1049h\e[?25l".self::SCREEN_MOUSE_ON.$screen->takeOver());
+        $vendor = new VendorWatch(base_path());
+        $restart = false;
 
         try {
             array_map(fn (RunsInBackground $runner) => $runner->start(), $this->screenRunners);
@@ -201,6 +204,11 @@ trait InteractsWithScreen
                     $screen->refreshState();
                     $refreshedAt = time();
                 }
+
+                if ($vendor->hasChanged()) {
+                    $restart = true;
+                    $this->screenQuit = true;
+                }
             }
         } finally {
             array_map(fn (RunsInBackground $runner) => $runner->stop(), $this->screenRunners);
@@ -209,7 +217,27 @@ trait InteractsWithScreen
             $this->stopRedrawingOnResize();
         }
 
+        if ($restart) {
+            $this->restartScreen();
+        }
+
         return self::SUCCESS;
+    }
+
+    /**
+     * Starts the same command again in this process, on the new packages.
+     */
+    private function restartScreen(): void
+    {
+        $arguments = array_values(array_filter((array) ($_SERVER['argv'] ?? []), is_string(...)));
+
+        $this->screenEnding();
+
+        if (function_exists('pcntl_exec') && $arguments !== []) {
+            @pcntl_exec(PHP_BINARY, $arguments);
+        }
+
+        $this->output->writeln('Your packages changed, so the studio needs a fresh start: run php artisan studio again.');
     }
 
     protected function streamScreenTab(): never
@@ -351,6 +379,12 @@ trait InteractsWithScreen
     protected function screenRefreshed(): void {}
 
     protected function screenTicked(): void {}
+
+    /**
+     * Called when the screen is about to end or start again, for the command
+     * to put away whatever it started.
+     */
+    protected function screenEnding(): void {}
 
     private function tickTheScreen(): void
     {

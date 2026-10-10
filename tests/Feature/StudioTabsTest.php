@@ -63,10 +63,10 @@ it('adds any command that provides a tab, in the order the config asks for, leav
     config(['studio-cli.tabs.hidden' => ['studio:watch']]);
     $hidden = ($this->labels)();
 
-    expect($discovered)->toBe(['Dashboard', 'Insights', 'Workflows', 'Activity', 'Shipped'])
-        ->and($ordered)->toBe(['Shipped', 'Activity', 'Dashboard', 'Insights', 'Workflows'])
-        ->and($hidden)->toBe(['Shipped', 'Dashboard', 'Insights', 'Workflows'])
-        ->and(($this->studio)()->tabKeys())->toBe(['shipped', 'dashboard', 'insights', 'workflows'])
+    expect($discovered)->toBe(['Dashboard', 'Scan', 'Insights', 'Workflows', 'Activity', 'Shipped'])
+        ->and($ordered)->toBe(['Shipped', 'Activity', 'Dashboard', 'Insights', 'Scan', 'Workflows'])
+        ->and($hidden)->toBe(['Shipped', 'Dashboard', 'Insights', 'Scan', 'Workflows'])
+        ->and(($this->studio)()->tabKeys())->toBe(['shipped', 'dashboard', 'insights', 'scan', 'workflows'])
         ->and(($this->plain)(($this->studio)()->render(120, 30, 'shipped')))->toContain('Everything shipped');
 });
 
@@ -83,7 +83,7 @@ it('opens the studio on the tab a command provides, rather than a screen of its 
     expect($screen)->toContain($expected)->toContain('Artisan Studio');
 })->with([
     'dashboard' => ['studio:dashboard', '📦 Deliverables'],
-    'insights' => ['studio:insights', 'Open issues by ruleset'],
+    'insights' => ['studio:insights', 'Attempting to fix grouped issues'],
     'workflows' => ['studio:workflows', 'Linear ticket estimation'],
     'activity' => ['studio:watch', 'When a workflow finishes a step'],
 ]);

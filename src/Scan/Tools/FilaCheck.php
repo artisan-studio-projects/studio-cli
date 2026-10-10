@@ -30,6 +30,18 @@ class FilaCheck extends Tool
         return $bin === null || ! is_dir($root.'/'.self::FOLDER) ? null : [$bin, self::FOLDER];
     }
 
+    public function fixCommand(string $root): ?array
+    {
+        $command = $this->command($root);
+
+        return $command === null ? null : [...$command, '--fix'];
+    }
+
+    public function fixesEvenWhenFailing(): bool
+    {
+        return true;
+    }
+
     public function missing(): string
     {
         return 'Not set up in this project: it needs laraveldaily/filacheck and an app/Filament folder.';

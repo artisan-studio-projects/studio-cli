@@ -22,6 +22,8 @@ final class Text extends Component
 
     private bool $wraps = false;
 
+    private bool $centred = false;
+
     private string|Closure $linkLabel = '';
 
     private string|Closure $buttonLabel = '';
@@ -46,6 +48,16 @@ final class Text extends Component
     public function wrap(bool $wraps = true): self
     {
         $this->wraps = $wraps;
+
+        return $this;
+    }
+
+    /**
+     * Each wrapped line centred in the width it has.
+     */
+    public function center(bool $centred = true): self
+    {
+        $this->centred = $centred;
 
         return $this;
     }
@@ -78,9 +90,11 @@ final class Text extends Component
         $content = (string) $this->evaluate($this->content, $state);
         $description = (string) $this->getDescription($state);
 
+        $indent = fn (string $line): string => $this->centred ? str_repeat(' ', max(0, intdiv($width - Canvas::visibleWidth($line), 2))).$line : $line;
+
         return $content === '' ? [] : [
-            ...array_map(fn (string $line): string => $canvas->span($line, $this->getColour($state), bold: $this->bold), $canvas->wrap($content, $width)),
-            ...array_map(fn (string $line): string => $canvas->span($line, $this->getDescriptionColour($state)), $description === '' ? [] : $canvas->wrap($description, $width)),
+            ...array_map(fn (string $line): string => $canvas->span($indent($line), $this->getColour($state), bold: $this->bold), $canvas->wrap($content, $width)),
+            ...array_map(fn (string $line): string => $canvas->span($indent($line), $this->getDescriptionColour($state)), $description === '' ? [] : $canvas->wrap($description, $width)),
         ];
     }
 

@@ -65,7 +65,6 @@ class TypeCoverage extends Tool
                 ->filter()
                 ->all())
             ->filter(fn (array $finding): bool => $finding['where'] !== '')
-            ->take(self::MOST_FINDINGS)
             ->values()
             ->all();
     }

@@ -40,15 +40,35 @@ final class Tab
 
     private ?Closure $unavailable = null;
 
+    private ?Closure $visibleWhen = null;
+
     private ?Closure $entersFromTop = null;
 
     private ?string $enterLabel = null;
+
+    private ?Closure $enterLabelUsing = null;
 
     private ?Closure $runsWhen = null;
 
     private ?Closure $runs = null;
 
     private function __construct(private string $label) {}
+
+    /**
+     * The tab is in the row only while this says so, such as a scan the app
+     * has asked for, unless `studio-cli.tabs.only_when_asked` is switched off.
+     */
+    public function visibleWhen(Closure $when): self
+    {
+        $this->visibleWhen = $when;
+
+        return $this;
+    }
+
+    public function isVisible(): bool
+    {
+        return $this->visibleWhen === null || ! config('studio-cli.tabs.only_when_asked', true) || (bool) ($this->visibleWhen)();
+    }
 
     public function unavailable(Closure $panel): self
     {
@@ -106,18 +126,23 @@ final class Tab
      * @param  Closure(mixed): bool  $when
      * @param  Closure(mixed): mixed  $run
      */
-    public function entersBy(Closure $when, Closure $run, string $label): self
+    public function entersBy(Closure $when, Closure $run, string|Closure $label): self
     {
         $this->runsWhen = $when;
         $this->runs = $run;
-        $this->enterLabel = $label;
+        $this->enterLabel = is_string($label) ? $label : null;
+        $this->enterLabelUsing = $label instanceof Closure ? $label : null;
 
         return $this;
     }
 
     public function enterLabel(): ?string
     {
-        return $this->depth() === 0 ? $this->enterLabel : null;
+        if ($this->depth() !== 0) {
+            return null;
+        }
+
+        return $this->enterLabelUsing === null ? $this->enterLabel : ($this->enterLabelUsing)();
     }
 
     public function closes(Closure $callback): self

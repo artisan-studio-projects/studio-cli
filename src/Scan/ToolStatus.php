@@ -5,10 +5,13 @@ declare(strict_types=1);
 namespace ArtisanStudio\StudioCli\Scan;
 
 use ArtisanStudio\StudioCli\Scan\Tools\Toolbox;
+use Closure;
 use Illuminate\Support\Carbon;
 
 final class ToolStatus
 {
+    public const string QUEUED = 'queued';
+
     public const string RUNNING = 'running';
 
     public const string RAN = 'ran';
@@ -18,6 +21,8 @@ final class ToolStatus
     public const string OFF = 'off';
 
     private const int CHECK_EVERY_SECONDS = 10;
+
+    private const int TESTS_MOST_SECONDS = 1900;
 
     /**
      * @var array{key: string, missing: array<string, array{name: string, packages: list<string>, files: array<string, string>, about: string}>}|null
@@ -34,9 +39,102 @@ final class ToolStatus
         $this->write(['asked' => array_values($tools)]);
     }
 
+    /**
+     * What counting the conventions found, for the card beside the tools'.
+     */
+    public function conventionsCounted(int $followed, int $undecided, int $files, ?int $flagged = null): void
+    {
+        $this->write(['conventions' => ['followed' => $followed, 'undecided' => $undecided, 'files' => $files, 'flagged' => $flagged, 'at' => Carbon::now()->toIso8601String()]]);
+    }
+
+    /**
+     * @return array{followed: int, undecided: int, files: int, flagged: ?int, at: string}|null
+     */
+    public function conventions(): ?array
+    {
+        $conventions = $this->read()['conventions'] ?? null;
+
+        return is_array($conventions) && isset($conventions['followed'], $conventions['undecided']) ? [
+            'followed' => (int) $conventions['followed'],
+            'undecided' => (int) $conventions['undecided'],
+            'files' => (int) ($conventions['files'] ?? 0),
+            'flagged' => isset($conventions['flagged']) ? (int) $conventions['flagged'] : null,
+            'at' => (string) ($conventions['at'] ?? ''),
+        ] : null;
+    }
+
+    /**
+     * How many models the blueprint mapped on this machine, before the studio names them.
+     */
+    public function blueprintMapped(int $models, ?int $relationships = null): void
+    {
+        $this->write(['blueprint' => ['models' => $models, 'relationships' => $relationships, 'at' => Carbon::now()->toIso8601String()]]);
+    }
+
+    /**
+     * @return array{models: int, relationships: ?int}|null
+     */
+    public function blueprint(): ?array
+    {
+        $blueprint = $this->read()['blueprint'] ?? null;
+
+        return is_array($blueprint) && is_int($blueprint['models'] ?? null) ? ['models' => $blueprint['models'], 'relationships' => is_int($blueprint['relationships'] ?? null) ? $blueprint['relationships'] : null] : null;
+    }
+
+    /**
+     * @param  array{ran: bool, reason?: string, findings?: list<mixed>, summary?: array<string, int>}  $result
+     */
+    public function coverageFinished(array $result): void
+    {
+        $this->write(['coverage' => [
+            'ran' => $result['ran'],
+            'running' => false,
+            'files' => count($result['findings'] ?? []),
+            'percent' => isset($result['summary']['coverage']) ? (int) $result['summary']['coverage'] : null,
+            'reason' => (string) ($result['reason'] ?? ''),
+        ]]);
+    }
+
+    /**
+     * Code coverage is being measured in a run of its own, in the background:
+     * the tests' own row is left as it was.
+     */
+    public function coverageRunning(): void
+    {
+        $this->write(['coverage' => ['ran' => false, 'running' => true, 'at' => Carbon::now()->toIso8601String(), 'files' => 0, 'percent' => null, 'reason' => '']]);
+    }
+
+    /**
+     * @return array{ran: bool, running: bool, at: ?string, files: int, percent: ?int, reason: string}|null
+     */
+    public function coverage(): ?array
+    {
+        $coverage = $this->read()['coverage'] ?? null;
+
+        return is_array($coverage) && is_bool($coverage['ran'] ?? null) ? [
+            'ran' => $coverage['ran'],
+            'running' => ($coverage['running'] ?? false) === true,
+            'at' => is_string($coverage['at'] ?? null) ? $coverage['at'] : null,
+            'files' => (int) ($coverage['files'] ?? 0),
+            'percent' => is_int($coverage['percent'] ?? null) ? $coverage['percent'] : null,
+            'reason' => (string) ($coverage['reason'] ?? ''),
+        ] : null;
+    }
+
     public function testsRunning(): void
     {
         $this->write(['tests' => ['state' => self::RUNNING, 'at' => Carbon::now()->toIso8601String()]]);
+    }
+
+    /**
+     * Whether the tests are running right now, so what else would lean on the
+     * machine waits for them. A run that never finished is not waited on for ever.
+     */
+    public function testsAreRunning(): bool
+    {
+        $tests = $this->tests();
+
+        return ($tests['state'] ?? null) === self::RUNNING && isset($tests['at']) && Carbon::parse($tests['at'])->diffInSeconds(Carbon::now(), true) < self::TESTS_MOST_SECONDS;
     }
 
     public function testsOff(): void
@@ -58,6 +156,95 @@ final class ToolStatus
             'took' => (int) ($result['took'] ?? 0),
             'reason' => (string) ($result['reason'] ?? ''),
         ]]);
+    }
+
+    /**
+     * A slow tool that runs after the others, in the background, so it never
+     * holds up the findings or the health score.
+     */
+    public function behind(string $tool, string $state): void
+    {
+        $this->write(['behind' => [...$this->allBehind(), $tool => $state]]);
+    }
+
+    /**
+     * @param  array{ran: bool, reason?: string, findings?: list<mixed>}  $result
+     */
+    public function caughtUp(string $tool, array $result): void
+    {
+        $run = $this->run() ?? ['tools' => [], 'done' => [], 'outcomes' => []];
+
+        $this->write([
+            'behind' => array_diff_key($this->allBehind(), [$tool => true]),
+            'run' => [
+                ...$run,
+                'outcomes' => [...($run['outcomes'] ?? []), $tool => ['ran' => $result['ran'], 'findings' => count($result['findings'] ?? []), 'reason' => (string) ($result['reason'] ?? '')]],
+            ],
+        ]);
+    }
+
+    /**
+     * The packages a major version behind whose findings the studio set aside.
+     *
+     * @param  list<array{package: string, installed: string, latest: string, findings: int}>  $packages
+     */
+    public function excluded(array $packages): void
+    {
+        $this->write(['excluded' => $packages]);
+    }
+
+    /**
+     * @return list<array{package: string, installed: string, latest: string, findings: int}>
+     */
+    public function excludedPackages(): array
+    {
+        return array_values(array_map(
+            fn (array $package): array => ['package' => (string) $package['package'], 'installed' => (string) ($package['installed'] ?? ''), 'latest' => (string) ($package['latest'] ?? ''), 'findings' => (int) ($package['findings'] ?? 0)],
+            array_filter($this->read()['excluded'] ?? [], fn (mixed $package): bool => is_array($package) && is_string($package['package'] ?? null)),
+        ));
+    }
+
+    /**
+     * How the studio groups what was found into the problems Insights lists:
+     * the same problem in several places counts once, and some are set aside.
+     *
+     * @param  array{problems?: int, open?: int}  $grouped
+     */
+    public function grouped(array $grouped): void
+    {
+        $this->write(['grouped' => ['problems' => (int) ($grouped['problems'] ?? 0), 'open' => (int) ($grouped['open'] ?? 0)]]);
+    }
+
+    /**
+     * @return array{problems: int, open: int}|null
+     */
+    public function groupedProblems(): ?array
+    {
+        $grouped = $this->read()['grouped'] ?? null;
+
+        return is_array($grouped) ? ['problems' => (int) ($grouped['problems'] ?? 0), 'open' => (int) ($grouped['open'] ?? 0)] : null;
+    }
+
+    /**
+     * Whether a scan has begun on this machine: the app has asked for one, or
+     * something of it has been counted or run. A reset leaves none.
+     */
+    public function hasScan(): bool
+    {
+        return array_intersect_key($this->read(), array_flip(['asked', 'picked', 'run', 'tests', 'blueprint', 'conventions', 'coverage'])) !== [];
+    }
+
+    public function isBehind(string $tool): ?string
+    {
+        return $this->allBehind()[$tool] ?? null;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function allBehind(): array
+    {
+        return $this->read()['behind'] ?? [];
     }
 
     /**
@@ -83,7 +270,7 @@ final class ToolStatus
      */
     public function running(array $tools): void
     {
-        $this->write(['run' => ['tools' => array_values($tools), 'done' => [], 'outcomes' => (array) ($this->run()['outcomes'] ?? [])]]);
+        $this->update(fn (array $status): array => [...$status, 'run' => ['tools' => array_values($tools), 'done' => [], 'starts' => [], 'outcomes' => (array) ($status['run']['outcomes'] ?? [])]]);
     }
 
     /**
@@ -91,19 +278,36 @@ final class ToolStatus
      */
     public function ran(string $tool, array $result = ['ran' => true]): void
     {
-        $run = $this->run();
-
-        if ($run !== null) {
-            $this->write(['run' => [
-                ...$run,
-                'done' => array_values(array_unique([...$run['done'], $tool])),
-                'outcomes' => [...($run['outcomes'] ?? []), $tool => ['ran' => $result['ran'], 'findings' => count($result['findings'] ?? []), 'reason' => (string) ($result['reason'] ?? '')]],
-            ]]);
-        }
+        $this->update(fn (array $status): array => ! is_array($status['run'] ?? null) ? $status : [...$status, 'run' => [
+            ...$status['run'],
+            'done' => array_values(array_unique([...(array) ($status['run']['done'] ?? []), $tool])),
+            'outcomes' => [...(array) ($status['run']['outcomes'] ?? []), $tool => ['ran' => $result['ran'], 'findings' => count($result['findings'] ?? []), 'reason' => (string) ($result['reason'] ?? ''), 'took' => isset($result['took']) ? (int) $result['took'] : null]],
+        ]]);
     }
 
     /**
-     * @return array{ran: bool, findings: int, reason: string}|null
+     * Notes that a tool of this run has begun, so one still waiting its turn
+     * is not shown as running, and each one's time can be counted.
+     */
+    public function started(string $tool): void
+    {
+        $this->update(fn (array $status): array => ! is_array($status['run'] ?? null) ? $status : [...$status, 'run' => [...$status['run'], 'starts' => [...(array) ($status['run']['starts'] ?? []), $tool => microtime(true)]]]);
+    }
+
+    /**
+     * When a tool of this run began, or null while it waits its turn. A run
+     * that did not note its starts began every tool together.
+     */
+    public function startedAt(string $tool): ?float
+    {
+        $run = $this->read()['run'] ?? null;
+        $at = is_array($run) && is_array($run['starts'] ?? null) ? ($run['starts'][$tool] ?? null) : ($run['started'] ?? null);
+
+        return is_float($at) || is_int($at) ? (float) $at : null;
+    }
+
+    /**
+     * @return array{ran: bool, findings: int, reason: string, took?: ?int}|null
      */
     public function outcome(string $tool): ?array
     {
@@ -165,7 +369,7 @@ final class ToolStatus
     }
 
     /**
-     * @return array{asked?: list<string>, picked?: list<string>, tests?: array<string, mixed>, run?: array{tools: list<string>, done: list<string>, outcomes?: array<string, array{ran: bool, findings: int, reason: string}>}}
+     * @return array{asked?: list<string>, picked?: list<string>, tests?: array<string, mixed>, behind?: array<string, string>, excluded?: list<mixed>, run?: array{tools: list<string>, done: list<string>, outcomes?: array<string, array{ran: bool, findings: int, reason: string}>}}
      */
     private function read(): array
     {
@@ -176,10 +380,40 @@ final class ToolStatus
     }
 
     /**
-     * @param  array{asked?: list<string>, picked?: list<string>, tests?: array<string, mixed>, run?: array{tools: list<string>, done: list<string>, outcomes?: array<string, array{ran: bool, findings: int, reason: string}>}}  $changes
+     * @param  array{asked?: list<string>, picked?: list<string>, tests?: array<string, mixed>, conventions?: array<string, mixed>, blueprint?: array<string, mixed>, coverage?: array<string, mixed>, behind?: array<string, string>, excluded?: list<mixed>, run?: array{tools: list<string>, done: list<string>, outcomes?: array<string, array{ran: bool, findings: int, reason: string}>}}  $changes
      */
     private function write(array $changes): void
     {
-        @file_put_contents($this->path(), (string) json_encode([...$this->read(), ...$changes]), LOCK_EX);
+        $this->update(fn (array $status): array => [...$status, ...$changes]);
+    }
+
+    /**
+     * Changes the status from what it is at this moment. Several processes
+     * write it at once (the checks, the tests, the studio itself), so each
+     * change is read, made and put in place under a lock, and put in place whole,
+     * so no one's change is lost and no one reads half a file.
+     *
+     * @param  Closure(array<string, mixed>): array<string, mixed>  $change
+     */
+    private function update(Closure $change): void
+    {
+        $lock = @fopen($this->path().'.lock', 'c');
+
+        if ($lock === false) {
+            return;
+        }
+
+        flock($lock, LOCK_EX);
+
+        try {
+            $temporary = $this->path().'.'.getmypid().'.tmp';
+
+            if (@file_put_contents($temporary, (string) json_encode($change($this->read()))) !== false) {
+                @rename($temporary, $this->path());
+            }
+        } finally {
+            flock($lock, LOCK_UN);
+            fclose($lock);
+        }
     }
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use ArtisanStudio\StudioCli\ActivityLog;
 use ArtisanStudio\StudioCli\BackgroundTasks;
+use ArtisanStudio\StudioCli\Console\PhpStanCommand;
 use ArtisanStudio\StudioCli\Scan\ScanProgress;
 use Symfony\Component\Process\Process;
 
@@ -71,6 +72,27 @@ it('starts the tests only once the scan\'s tools have finished, so the scan neve
     expect(collect($log->entries())->where('kind', 'tests')->first()['colour'])->toBe('green');
 });
 
+it('runs PHPStan after the scan\'s tools and the tests after PHPStan, one at a time, so neither holds up the findings', function (): void {
+    $log = new ActivityLog;
+    $tasks = new BackgroundTasks($this->root, $log);
+
+    $tasks->start('tools', 'Scan tools', 'Running your tools…', ['studio:tools'], then: PhpStanCommand::afterTheTools([['key' => 'tests', 'label' => 'Your tests', 'working' => 'Checking whether you switched your tests on…', 'command' => ['studio:tests']]]));
+
+    waitUntilFinished($tasks, 'tools');
+
+    expect($tasks->isRunning('phpstan'))->toBeTrue()
+        ->and($tasks->isRunning('tests'))->toBeFalse()
+        ->and(collect($log->entries())->firstWhere('kind', 'phpstan'))->toMatchArray(['label' => 'PHPStan', 'detail' => PhpStanCommand::WORKING]);
+
+    waitUntilFinished($tasks, 'phpstan');
+
+    expect(collect($log->entries())->firstWhere('kind', 'tests'))->toMatchArray(['label' => 'Your tests']);
+
+    waitUntilFinished($tasks, 'tests');
+
+    expect(collect($log->entries())->where('kind', 'tests')->first()['colour'])->toBe('green');
+});
+
 it('marks work that failed in amber, and never starts the same work twice at once', function (): void {
     $log = new ActivityLog;
     $tasks = new BackgroundTasks($this->root, $log);
@@ -104,4 +126,27 @@ it('reports the scan only while it runs, and leaves nothing behind once it ends'
     expect($progress->label())->toBeNull()
         ->and($progress->fraction())->toBeNull()
         ->and(is_file($progress->path()))->toBeFalse();
+});
+
+it('lets a detached task outlive the studio, and the next studio follows it to its last line', function (): void {
+    file_put_contents($this->root.'/artisan', <<<'PHP'
+        <?php
+        usleep(600_000);
+        file_put_contents(getenv("STUDIO_TASK_JOURNAL"), (getenv("STUDIO_DETACHED") === "1" ? "Fixed on its own.\n" : "Not detached.\n"), FILE_APPEND);
+        PHP);
+    $log = new ActivityLog;
+    $tasks = new BackgroundTasks($this->root, $log);
+
+    $tasks->start('fixes', 'Fix with SAMI', 'Fixing…', ['studio:fix'], detached: true);
+    unset($tasks);
+
+    $later = new BackgroundTasks($this->root, $log);
+
+    expect($later->isRunning('fixes'))->toBeTrue();
+
+    waitUntilFinished($later, 'fixes');
+
+    expect($log->entries()[0])->toMatchArray(['label' => 'Fix with SAMI', 'detail' => 'Fixed on its own.'])
+        ->and($later->isRunning('fixes'))->toBeFalse()
+        ->and((new BackgroundTasks($this->root, $log))->isRunning('fixes'))->toBeFalse();
 });

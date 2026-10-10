@@ -23,6 +23,11 @@ class Rector extends Tool
         return $bin === null || ! is_file($root.'/rector.php') ? null : [$bin, 'process', '--dry-run', '--output-format=json', '--no-progress-bar'];
     }
 
+    public function fixCommand(string $root): ?array
+    {
+        return $this->command($root) === null ? null : [(string) $this->bin($root, 'rector'), 'process', '--no-progress-bar'];
+    }
+
     public function missing(): string
     {
         return 'Not set up in this project: it needs rector/rector and a rector.php.';
@@ -67,7 +72,6 @@ class Rector extends Tool
                 ))
                 ->all())
             ->filter(fn (array $finding): bool => $finding['where'] !== '')
-            ->take(self::MOST_FINDINGS)
             ->values()
             ->all();
     }

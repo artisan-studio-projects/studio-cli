@@ -7,9 +7,11 @@ use ArtisanStudio\StudioCli\BackgroundTasks;
 use ArtisanStudio\StudioCli\Blueprint;
 use ArtisanStudio\StudioCli\Console\BlueprintCommand;
 use ArtisanStudio\StudioCli\Events\StudioReported;
+use ArtisanStudio\StudioCli\Fix\FixProgress;
 use ArtisanStudio\StudioCli\LocalChanges;
 use ArtisanStudio\StudioCli\Saloon\Requests\SubmitBlueprintRequest;
 use ArtisanStudio\StudioCli\Scan\ToolStatus;
+use ArtisanStudio\StudioCli\Terminal\ScreenRequests;
 use ArtisanStudio\StudioCli\Tests\Fixtures\Blueprint\Models\Broken;
 use ArtisanStudio\StudioCli\Tests\Fixtures\Blueprint\Models\Customer;
 use ArtisanStudio\StudioCli\Tests\Fixtures\Blueprint\Models\Invoice;
@@ -20,6 +22,7 @@ use Illuminate\Support\Facades\DB;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Http\PendingRequest;
 use Saloon\Laravel\Facades\Saloon;
+use Symfony\Component\Process\Process;
 
 beforeEach(function (): void {
     config([
@@ -164,7 +167,9 @@ it('maps the blueprint and counts the conventions in the background when the stu
     event(new StudioReported(['type' => 'blueprint', 'kind' => 'project']));
 
     expect(app(ActivityLog::class)->ofKinds(['blueprint'])[0])->toMatchArray(['label' => 'Blueprint', 'detail' => 'Mapping your models…', 'colour' => 'cyan'])
-        ->and(app(ActivityLog::class)->ofKinds(['conventions'])[0])->toMatchArray(['label' => 'Conventions', 'detail' => 'Counting how your project is written…']);
+        ->and(app(ActivityLog::class)->ofKinds(['conventions'])[0])->toMatchArray(['label' => 'Conventions', 'detail' => 'Counting how your project is written…'])
+        ->and(app(ActivityLog::class)->ofKinds(['tests'])[0])->toMatchArray(['label' => 'Your tests', 'detail' => 'Checking whether you switched your tests on…'])
+        ->and(app(ActivityLog::class)->ofKinds(['tools'])[0])->toMatchArray(['label' => 'Scan tools']);
 
     untilBothFinish($tasks);
 
@@ -197,15 +202,82 @@ it('waits for a picked rule to be installed before it runs any tools, so they al
     runsInTheBackgroundAt(sys_get_temp_dir().'/studio-picked-'.bin2hex(random_bytes(4)), 0, 'Ran your checking tools.');
     @unlink(app(ToolStatus::class)->path());
 
+    app(ScreenRequests::class)->take();
+
     event(new StudioReported(['type' => 'tools', 'kind' => 'project', 'tools' => ['phpstan']]));
 
     expect(app(ActivityLog::class)->ofKinds(['tools']))->toBe([])
         ->and(app(ToolStatus::class)->asks('phpstan'))->toBeTrue()
-        ->and(array_keys(app(ToolStatus::class)->missing()))->toBe(['phpstan']);
+        ->and(array_keys(app(ToolStatus::class)->missing()))->toBe(['phpstan'])
+        ->and(app(ScreenRequests::class)->take())->toMatchArray(['tab' => 'scan']);
 
     @unlink(app(ToolStatus::class)->path());
 });
 
+it('starts measuring code coverage in the background the moment it is picked, beside the other checks, without the tests row running again', function (): void {
+    $tasks = runsInTheBackgroundAt(sys_get_temp_dir().'/studio-coverage-'.bin2hex(random_bytes(4)), 0, 'Code coverage measured.');
+    @unlink(app(ToolStatus::class)->path());
+    app(ToolStatus::class)->testsFinished(['ran' => true, 'took' => 58_000, 'summary' => ['tests' => 10, 'failed' => 0, 'skipped' => 0]]);
+
+    event(new StudioReported(['type' => 'tools', 'kind' => 'project', 'tools' => ['pest-coverage']]));
+
+    expect(app(ActivityLog::class)->ofKinds(['coverage'])[0])->toMatchArray(['label' => 'Code coverage', 'detail' => 'Measuring code coverage in the background…'])
+        ->and(app(ActivityLog::class)->ofKinds(['tools'])[0])->toMatchArray(['label' => 'Scan tools'])
+        ->and($tasks->isRunning('coverage'))->toBeTrue()
+        ->and(app(ToolStatus::class)->tests()['state'])->toBe(ToolStatus::RAN);
+
+    $until = microtime(true) + 10;
+
+    while (($tasks->isRunning('coverage') || $tasks->isRunning('tools')) && microtime(true) < $until) {
+        usleep(20_000);
+    }
+
+    $tasks->tick();
+    @unlink(app(ToolStatus::class)->path());
+});
+
+it('stops what the scan is running, and everything that started, when the developer resets it in the app', function (): void {
+    $root = sys_get_temp_dir().'/studio-reset-'.bin2hex(random_bytes(4));
+    @mkdir($root, 0755, true);
+    file_put_contents($root.'/artisan', '<?php sleep(30);');
+    $tasks = app()->instance(BackgroundTasks::class, new BackgroundTasks($root, app(ActivityLog::class)));
+    app(ToolStatus::class)->testsFinished(['ran' => true, 'took' => 1000, 'summary' => ['tests' => 10, 'failed' => 0, 'skipped' => 0]]);
+
+    $fixes = app(FixProgress::class);
+    $fixes->begin('sami/fixes-reset', ['pint'], ['pint' => 3]);
+    $fixes->finished(['pint' => 0]);
+
+    $tasks->start('tools', 'Scan tools', 'Running the extra checks you picked…', ['studio:tools']);
+
+    expect($tasks->isRunning('tools'))->toBeTrue();
+
+    event(new StudioReported(['type' => 'reset', 'kind' => 'project']));
+
+    expect($tasks->isRunning('tools'))->toBeFalse()
+        ->and(app(ActivityLog::class)->ofKinds(['tools'])[0])->toMatchArray(['detail' => 'Stopped, because the scan was reset.', 'colour' => 'amber'])
+        ->and(app(ToolStatus::class)->tests())->toBeNull()
+        ->and($fixes->read())->toBeNull();
+});
+
+it('acts once on a reset made while the terminal was closed, when the studio says it again on connecting', function (): void {
+    $resetAt = (int) (microtime(true) * 1000) + 60_000;
+    @unlink(sys_get_temp_dir().'/studio-reset-'.hash('xxh128', base_path()).'.txt');
+    app(ToolStatus::class)->testsFinished(['ran' => true, 'took' => 1000, 'summary' => ['tests' => 10, 'failed' => 0, 'skipped' => 0]]);
+    $fixes = app(FixProgress::class);
+    $fixes->begin('sami/fixes-closed', ['pint'], ['pint' => 3]);
+    $fixes->finished(['pint' => 0]);
+
+    event(new StudioReported(['type' => 'reset', 'kind' => 'project', 'reset_at' => $resetAt, 'history' => true]));
+
+    expect($fixes->read())->toBeNull()
+        ->and(app(ToolStatus::class)->tests())->toBeNull();
+
+    app(ToolStatus::class)->testsFinished(['ran' => true, 'took' => 1000, 'summary' => ['tests' => 12, 'failed' => 0, 'skipped' => 0]]);
+
+    event(new StudioReported(['type' => 'reset', 'kind' => 'project', 'reset_at' => $resetAt, 'history' => true]));
+
+    expect(app(ToolStatus::class)->tests())->not->toBeNull();
+});
 it('only maps the blueprint when asked', function (): void {
     Saloon::fake([SubmitBlueprintRequest::class => MockResponse::make(['accepted' => 2], 202)]);
 
@@ -222,4 +294,20 @@ it('says so in the activity feed when the studio does not take it', function ():
     untilBothFinish($tasks);
 
     expect(app(ActivityLog::class)->ofKinds(['blueprint'])[0])->toMatchArray(['detail' => 'The studio did not take the blueprint.', 'colour' => 'amber']);
+});
+
+it('stops a fix run still going when the scan is reset, and clears it from the terminal', function (): void {
+    $run = new Process(['sleep', '30']);
+    $run->start();
+    $fixes = app(FixProgress::class);
+    file_put_contents($fixes->path(), (string) json_encode(['phase' => FixProgress::FIXING, 'branch' => 'sami/fixes-reset', 'at' => microtime(true), 'pid' => $run->getPid(), 'rulesets' => ['rector' => ['state' => FixProgress::RUNNING, 'found' => 3, 'fixed' => 0, 'files' => 0]]]));
+    @unlink(sys_get_temp_dir().'/studio-reset-'.hash('xxh128', base_path()).'.txt');
+
+    expect($fixes->isAlive())->toBeTrue();
+
+    event(new StudioReported(['type' => 'reset', 'kind' => 'project', 'reset_at' => (int) (microtime(true) * 1000) + 1000]));
+    usleep(300_000);
+
+    expect($run->isRunning())->toBeFalse()
+        ->and($fixes->read())->toBeNull();
 });

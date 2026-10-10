@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace ArtisanStudio\StudioCli\Console;
 
 use ArtisanStudio\StudioCli\Scan\ScanProgress;
+use ArtisanStudio\StudioCli\Scan\ToolStatus;
 use ArtisanStudio\StudioCli\Scan\Walk;
 use ArtisanStudio\StudioCli\Studio;
 use ArtisanStudio\StudioCli\TaskJournal;
@@ -66,6 +67,7 @@ class ConventionsCommand extends Command
         }
 
         $counted = (array) ($answer['counted'] ?? []);
+        app(ToolStatus::class)->conventionsCounted((int) ($counted['followed'] ?? 0), (int) ($counted['undecided'] ?? 0), (int) $facts['read'], $flagged);
 
         return $this->outcome(sprintf(
             'Counted how %s files are written: %d conventions followed, %d to decide%s.',

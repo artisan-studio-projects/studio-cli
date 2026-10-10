@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ArtisanStudio\StudioCli\Console;
 
+use ArtisanStudio\StudioCli\Scan\Tools\Tests;
 use ArtisanStudio\StudioCli\Scan\Tools\Toolbox;
 use ArtisanStudio\StudioCli\Scan\ToolStatus;
 use ArtisanStudio\StudioCli\Studio;
@@ -16,6 +17,10 @@ class TestsCommand extends Command
     public const string SIGNATURE = 'studio:tests';
 
     public const string TESTS = 'tests';
+
+    public const string COVERAGE = 'pest-coverage';
+
+    public const string COVERAGE_TASK = 'coverage';
 
     public const int TIMEOUT = 1900;
 
@@ -37,18 +42,47 @@ class TestsCommand extends Command
             return $this->outcome('The studio did not say whether to run your tests. Check php artisan studio:settings.', self::FAILURE);
         }
 
-        if (! in_array(self::TESTS, $asked, true)) {
+        if (array_intersect([self::TESTS, self::COVERAGE], $asked) === []) {
             $status->testsOff();
 
             return $this->outcome('Your tests are switched off for this scan. You can switch them on when you authorize the next one.', self::SUCCESS);
         }
 
-        $this->step($journal, 'Running your tests in parallel, as you asked. Your scan results are already in; this can take a few minutes.');
-        $status->testsRunning();
+        $toolbox = new Toolbox;
+        $tests = $toolbox->tool(self::TESTS);
+        $covering = $tests instanceof Tests && in_array(self::COVERAGE, $asked, true);
 
-        $result = (new Toolbox)->run([self::TESTS])[self::TESTS];
-        $status->testsFinished($result);
-        $payload = ['commit' => $this->commit(), 'tools' => [self::TESTS => $result]];
+        while ($covering && $status->testsAreRunning()) {
+            sleep(2);
+        }
+
+        $quiet = $covering && ($status->tests()['state'] ?? null) === ToolStatus::RAN;
+
+        if ($quiet) {
+            $this->step($journal, 'Measuring code coverage, as you asked. This runs your tests once more, quietly in the background; your test results above stay as they are.');
+            $status->coverageRunning();
+        } else {
+            $this->step($journal, 'Running your tests in parallel, as you asked. Your scan results are already in; this can take a few minutes.');
+            $status->testsRunning();
+        }
+
+        if ($covering) {
+            $tests->withCoverage();
+        }
+
+        $result = $toolbox->run([self::TESTS])[self::TESTS];
+
+        if (! $quiet) {
+            $status->testsFinished($result);
+        }
+
+        $coverage = $covering ? $tests->coverage(base_path()) : null;
+
+        if ($coverage !== null) {
+            $status->coverageFinished($coverage);
+        }
+
+        $payload = ['commit' => $this->commit(), 'tools' => [...($quiet ? [] : [self::TESTS => $result]), ...($coverage === null ? [] : [self::COVERAGE => $coverage])]];
 
         if ($this->option('json')) {
             $this->line((string) json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
@@ -60,7 +94,17 @@ class TestsCommand extends Command
             return $this->outcome('The studio did not take the test results. Check php artisan studio:settings.', self::FAILURE);
         }
 
-        return $this->outcome($this->summary($result), self::SUCCESS);
+        return $this->outcome($quiet ? $this->coverageSummary($coverage ?? ['ran' => false]) : $this->summary($result), self::SUCCESS);
+    }
+
+    /**
+     * @param  array{ran: bool, reason?: string, findings?: list<mixed>, summary?: array<string, int>}  $coverage
+     */
+    private function coverageSummary(array $coverage): string
+    {
+        return $coverage['ran']
+            ? sprintf('Code coverage measured: %d%% of your code is covered, %s files barely tested. Only file names and percentages were sent.', (int) ($coverage['summary']['coverage'] ?? 0), number_format(count($coverage['findings'] ?? [])))
+            : 'Code coverage was not measured: '.($coverage['reason'] ?? 'it did not run.');
     }
 
     /**

@@ -2,11 +2,14 @@
 
 declare(strict_types=1);
 
+use ArtisanStudio\StudioCli\Scan\Load;
 use ArtisanStudio\StudioCli\Scan\Tools\ComposerAudit;
 use ArtisanStudio\StudioCli\Scan\Tools\FilaCheck;
 use ArtisanStudio\StudioCli\Scan\Tools\NodeAudit;
+use ArtisanStudio\StudioCli\Scan\Tools\PestArch;
 use ArtisanStudio\StudioCli\Scan\Tools\PhpStan;
 use ArtisanStudio\StudioCli\Scan\Tools\Pint;
+use ArtisanStudio\StudioCli\Scan\Tools\Psalm;
 use ArtisanStudio\StudioCli\Scan\Tools\Rector;
 use ArtisanStudio\StudioCli\Scan\Tools\Tests;
 use ArtisanStudio\StudioCli\Scan\Tools\Toolbox;
@@ -15,6 +18,22 @@ use ArtisanStudio\StudioCli\Scan\Tools\TypeCoverage;
 beforeEach(function (): void {
     $this->root = sys_get_temp_dir().'/studio-tools-'.bin2hex(random_bytes(4));
     mkdir($this->root, 0755, true);
+});
+
+it('counts the PHP files PHPStan reads under the project\'s own paths, and how many it found something in', function (): void {
+    mkdir($this->root.'/app/Models', 0755, true);
+    mkdir($this->root.'/src', 0755, true);
+    array_map(fn (string $path): int|false => file_put_contents($this->root.'/'.$path, '<?php'), ['app/A.php', 'app/Models/B.php', 'app/notes.txt', 'src/C.php', 'src/D.php']);
+    file_put_contents($this->root.'/phpstan.neon', "parameters:\n    paths:\n        - app\n        - src/C.php\n    level: 5\n");
+    $output = (string) json_encode(['totals' => ['errors' => 0, 'file_errors' => 3], 'files' => [
+        $this->root.'/app/A.php' => ['messages' => [['line' => 3, 'message' => 'x', 'identifier' => 'property.notFound'], ['line' => 9, 'message' => 'y', 'identifier' => 'return.type']]],
+        $this->root.'/app/A.php (in context of class App\B)' => ['messages' => [['line' => 4, 'message' => 'z', 'identifier' => 'method.notFound']]],
+    ]]);
+
+    $phpstan = new PhpStan;
+
+    expect($phpstan->findings($output, $this->root))->toHaveCount(3)
+        ->and($phpstan->summary())->toBe(['files' => 3, 'flagged' => 1]);
 });
 
 it('reads Pint\'s findings as file and rule, in either of its JSON shapes', function (): void {
@@ -74,7 +93,7 @@ it('reads the test run\'s JUnit report as counts and failing tests, never what t
 
     $findings = $tests->findings('', $this->root);
 
-    expect($command)->toBe(['vendor/bin/pest', '--parallel', '--log-junit', $report])
+    expect($command)->toBe(['vendor/bin/pest', '--parallel', '--processes='.Load::forTests(), '--log-junit', $report])
         ->and($findings)->toBe([['where' => 'tests/Feature/OrderTest.php:42', 'rule' => 'failed', 'message' => 'it ships an order failed.']])
         ->and($tests->summary())->toBe(['tests' => 3, 'failed' => 1, 'skipped' => 1])
         ->and(json_encode($findings))->not->toContain('customer@example.com')
@@ -100,6 +119,83 @@ it('reads Pest\'s type coverage report as the untyped declarations, by file and 
     ])
         ->and($coverage->summary())->toBe(['coverage' => 95])
         ->and((new TypeCoverage)->command(sys_get_temp_dir()))->toBeNull();
+});
+
+it('runs Pest\'s arch presets from a git-ignored test file it removes after, as one finding per broken preset', function (): void {
+    mkdir($this->root.'/vendor/bin', 0755, true);
+    mkdir($this->root.'/'.PestArch::PLUGIN, 0755, true);
+    mkdir($this->root.'/storage/framework/testing', 0755, true);
+    touch($this->root.'/vendor/bin/pest');
+    $arch = new PestArch;
+
+    expect($arch->isSetUp($this->root))->toBeTrue()
+        ->and(is_dir($this->root.'/'.PestArch::FOLDER))->toBeFalse();
+
+    $command = $arch->command($this->root);
+    $report = $command[array_search('--log-junit', $command, true) + 1];
+
+    expect(file_get_contents($this->root.'/'.PestArch::FOLDER.'/ArchTest.php'))->toContain("arch('php')->preset()->php();")->toContain("arch('laravel')->preset()->laravel();")->toContain("arch('security')->preset()->security();");
+
+    file_put_contents($report, <<<'XML'
+        <?xml version="1.0" encoding="UTF-8"?>
+        <testsuites>
+          <testsuite name="ArchTest" tests="3" failures="2">
+            <testcase name="php" file="storage/framework/testing/studio-arch/ArchTest.php::php"/>
+            <testcase name="laravel" file="storage/framework/testing/studio-arch/ArchTest.php::laravel">
+              <failure type="Pest\Arch\Exceptions\ArchExpectationFailedException">laravelExpecting 'exit' not to be used on 'App\Console\Commands\SamiCommand'.
+        at app/Console/Commands/SamiCommand.php:76
+        at vendor/pestphp/pest-plugin-arch/src/Blueprint.php:207</failure>
+            </testcase>
+            <testcase name="security" file="storage/framework/testing/studio-arch/ArchTest.php::security">
+              <failure type="Pest\Arch\Exceptions\ArchExpectationFailedException">securityExpecting 'md5' not to be used on 'App\Support\Motion\Cycle'.
+        at app/Support/Motion/Cycle.php:31</failure>
+            </testcase>
+          </testsuite>
+        </testsuites>
+        XML);
+
+    expect($arch->findings('', $this->root))->toBe([
+        ['where' => 'app/Console/Commands/SamiCommand.php:76', 'rule' => 'arch-laravel', 'message' => "Expecting 'exit' not to be used on 'App\\Console\\Commands\\SamiCommand'."],
+        ['where' => 'app/Support/Motion/Cycle.php:31', 'rule' => 'arch-security', 'message' => "Expecting 'md5' not to be used on 'App\\Support\\Motion\\Cycle'."],
+    ])
+        ->and(is_dir($this->root.'/'.PestArch::FOLDER))->toBeFalse()
+        ->and(file_exists($report))->toBeFalse();
+});
+
+it('measures code coverage in the same test run when asked, and lists the files tests barely reach', function (): void {
+    mkdir($this->root.'/vendor/bin', 0755, true);
+    touch($this->root.'/vendor/bin/pest');
+    $tests = (new class extends Tests
+    {
+        public function canCover(): bool
+        {
+            return true;
+        }
+    })->withCoverage();
+    $command = $tests->command($this->root);
+    $clover = $command[array_search('--coverage-clover', $command, true) + 1];
+
+    file_put_contents($clover, <<<XML
+        <?xml version="1.0" encoding="UTF-8"?>
+        <coverage>
+          <project>
+            <file name="{$this->root}/app/Models/Order.php"><metrics statements="40" coveredstatements="36"/></file>
+            <file name="{$this->root}/app/Jobs/Ship.php"><metrics statements="20" coveredstatements="5"/></file>
+            <file name="{$this->root}/app/Mail/Receipt.php"><metrics statements="10" coveredstatements="0"/></file>
+            <metrics statements="70" coveredstatements="41"/>
+          </project>
+        </coverage>
+        XML);
+
+    expect($tests->coverage($this->root))->toBe([
+        'ran' => true,
+        'findings' => [
+            ['where' => 'app/Jobs/Ship.php', 'rule' => 'low-coverage', 'message' => 'Tests run 25% of this file.'],
+            ['where' => 'app/Mail/Receipt.php', 'rule' => 'uncovered', 'message' => 'No test runs this file.'],
+        ],
+        'summary' => ['coverage' => 58],
+    ])
+        ->and((new Tests)->command($this->root))->not->toContain('--coverage-clover');
 });
 
 it('knows what each missing tool needs before it offers to install it', function (): void {
@@ -137,22 +233,70 @@ it('reads Rector\'s changes by file and rector name, and never sends its diff', 
         ->and(json_encode($findings))->not->toContain('sk_live');
 });
 
-it('reads composer audit\'s advisories and abandoned packages against composer.lock', function (): void {
+it('reads composer audit\'s advisories and abandoned packages against the composer.json line that brings them in', function (): void {
+    file_put_contents($this->root.'/composer.json', (string) json_encode(['require' => ['php' => '^8.4', 'guzzlehttp/guzzle' => '^7.8', 'acme/app' => '^1.0']], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+    file_put_contents($this->root.'/composer.lock', (string) json_encode(['packages' => [['name' => 'acme/app', 'require' => ['old/package' => '^1.0']], ['name' => 'old/package'], ['name' => 'guzzlehttp/guzzle']]]));
     $output = json_encode(['advisories' => ['guzzlehttp/guzzle' => [['advisoryId' => 'PKSA-1', 'cve' => 'CVE-2026-1234', 'title' => 'Cookie leakage', 'affectedVersions' => '<7.8.2', 'severity' => 'high']]], 'abandoned' => ['old/package' => 'new/package']]);
 
     expect((new ComposerAudit)->findings((string) $output, $this->root))->toBe([
-        ['where' => 'composer.lock', 'rule' => 'CVE-2026-1234', 'message' => 'guzzlehttp/guzzle <7.8.2: Cookie leakage (high)'],
-        ['where' => 'composer.lock', 'rule' => 'abandoned', 'message' => 'old/package is abandoned; use new/package instead.'],
+        ['where' => 'composer.json:4', 'rule' => 'CVE-2026-1234', 'message' => 'guzzlehttp/guzzle <7.8.2: Cookie leakage (high)'],
+        ['where' => 'composer.json:5', 'rule' => 'abandoned', 'message' => 'old/package is abandoned (via acme/app); use new/package instead.'],
     ]);
 });
 
-it('reads npm\'s and pnpm\'s audit shapes against their own lockfile', function (): void {
+it('reads npm\'s and pnpm\'s audit shapes against the package.json line that brings each package in', function (): void {
     file_put_contents($this->root.'/pnpm-lock.yaml', '');
-    $pnpm = json_encode(['advisories' => ['1001' => ['module_name' => 'vite', 'vulnerable_versions' => '<5.4.6', 'title' => 'Path traversal', 'severity' => 'moderate', 'cves' => ['CVE-2026-9']]]]);
-    $npm = json_encode(['vulnerabilities' => ['vite' => ['severity' => 'moderate', 'range' => '<5.4.6', 'via' => [['source' => 1001, 'title' => 'Path traversal']]]]]);
+    file_put_contents($this->root.'/package.json', (string) json_encode(['scripts' => ['dev' => 'vite'], 'devDependencies' => ['laravel-vite-plugin' => '^2.0', 'vite' => '^7.0']], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+    $pnpm = json_encode([
+        'actions' => [['module' => 'rollup', 'resolves' => [['id' => 2002, 'path' => '.>vite>rollup']]]],
+        'advisories' => [
+            '1001' => ['module_name' => 'vite', 'vulnerable_versions' => '<5.4.6', 'title' => 'Path traversal', 'severity' => 'moderate', 'cves' => ['CVE-2026-9']],
+            '2002' => ['module_name' => 'rollup', 'vulnerable_versions' => '<4.59.0', 'patched_versions' => '>=4.59.0', 'title' => 'File write', 'severity' => 'high', 'cves' => ['CVE-2026-10'], 'findings' => [['version' => '4.52.5', 'paths' => []]]],
+        ],
+    ]);
+    $npm = json_encode(['vulnerabilities' => [
+        'rollup' => ['severity' => 'high', 'isDirect' => false, 'range' => '<4.59.0', 'via' => [['source' => 2002, 'title' => 'File write', 'severity' => 'high']], 'effects' => ['vite']],
+        'vite' => ['severity' => 'high', 'isDirect' => true, 'range' => '<7.0.0', 'via' => ['rollup'], 'effects' => []],
+    ]]);
 
-    expect((new NodeAudit)->findings((string) $pnpm, $this->root))->toBe([['where' => 'pnpm-lock.yaml', 'rule' => 'CVE-2026-9', 'message' => 'vite <5.4.6: Path traversal (moderate)']])
-        ->and((new NodeAudit)->findings((string) $npm, $this->root)[0])->toMatchArray(['rule' => '1001', 'message' => 'vite <5.4.6: Path traversal (moderate)']);
+    expect((new NodeAudit)->findings((string) $pnpm, $this->root))->toBe([
+        ['where' => 'package.json:7', 'rule' => 'CVE-2026-9', 'message' => 'vite <5.4.6: Path traversal (moderate)'],
+        ['where' => 'package.json:7', 'rule' => 'CVE-2026-10', 'message' => 'rollup 4.52.5 via vite: File write (high)'],
+    ])
+        ->and((new NodeAudit)->findings((string) $npm, $this->root))->toBe([
+            ['where' => 'package.json:7', 'rule' => '2002', 'message' => 'rollup <4.59.0 via vite: File write (high)'],
+        ]);
+});
+
+it('reads Psalm\'s JSON list as file, line, issue type and message, errors only, and needs its psalm.xml to run', function (): void {
+    $psalm = new Psalm;
+    $output = "Psalm found 2 errors\n".json_encode([
+        ['severity' => 'error', 'type' => 'UndefinedMethod', 'message' => 'Method App\Models\Order::total does not exist', 'file_path' => $this->root.'/app/Orders.php', 'file_name' => 'app/Orders.php', 'line_from' => 12],
+        ['severity' => 'info', 'type' => 'MixedAssignment', 'message' => 'Unable to determine the type', 'file_path' => $this->root.'/app/Orders.php', 'line_from' => 20],
+    ]);
+
+    expect($psalm->findings((string) $output, $this->root))->toBe([['where' => 'app/Orders.php:12', 'rule' => 'UndefinedMethod', 'message' => 'Method App\Models\Order::total does not exist']])
+        ->and($psalm->summary())->toMatchArray(['flagged' => 1])
+        ->and($psalm->findings('[]', $this->root))->toBe([])
+        ->and($psalm->findings('PHP Fatal error', $this->root))->toBeNull()
+        ->and($psalm->command($this->root))->toBeNull()
+        ->and($psalm->install()['packages'])->toBe(['vimeo/psalm', 'psalm/plugin-laravel'])
+        ->and($psalm->install()['files']['psalm.xml'])->toContain('Psalm\LaravelPlugin\Plugin');
+});
+
+it('marks an advisory only a major update clears, so the studio can set it aside for a workflow', function (): void {
+    file_put_contents($this->root.'/pnpm-lock.yaml', '');
+    $pnpm = json_encode(['advisories' => [
+        '1' => ['module_name' => 'postcss-selector-parser', 'vulnerable_versions' => '<7.1.6', 'patched_versions' => '>=7.1.6', 'title' => 'ReDoS', 'severity' => 'high', 'cves' => ['CVE-1'], 'findings' => [['version' => '6.0.10']]],
+        '2' => ['module_name' => 'axios', 'vulnerable_versions' => '<1.15.0', 'patched_versions' => '>=1.15.0', 'title' => 'SSRF', 'severity' => 'high', 'cves' => ['CVE-2'], 'findings' => [['version' => '1.12.2']]],
+    ]]);
+    $npm = json_encode(['vulnerabilities' => ['vite' => ['severity' => 'moderate', 'range' => '<6.0.0', 'via' => [['source' => 1, 'title' => 'x']], 'fixAvailable' => ['name' => 'vite', 'version' => '6.0.0', 'isSemVerMajor' => true]]]]);
+
+    $found = (new NodeAudit)->findings((string) $pnpm, $this->root);
+
+    expect($found[0])->toMatchArray(['rule' => 'CVE-1', 'major' => true])
+        ->and($found[1])->not->toHaveKey('major')
+        ->and((new NodeAudit)->findings((string) $npm, $this->root)[0])->toMatchArray(['major' => true]);
 });
 
 it('leaves PHPStan out until the project says what to analyse in a phpstan.neon', function (): void {
@@ -215,13 +359,15 @@ it('says when each tool starts and when it is done, one at a time, so the studio
 });
 
 it('says why a tool was not checked rather than leaving a gap that looks like a pass', function (): void {
-    $results = (new Toolbox($this->root))->run(['pint', 'composer-audit', 'peck']);
+    $results = (new Toolbox($this->root))->run(['pint', 'composer-audit', 'peck', 'not-a-tool']);
 
-    expect($results)->toBe([
+    expect($results)->toMatchArray([
         'pint' => ['ran' => false, 'reason' => 'Not installed in this project.'],
         'composer-audit' => ['ran' => false, 'reason' => 'This project has no composer.lock.'],
-        'peck' => ['ran' => false, 'reason' => 'This version of the studio CLI cannot run it yet.'],
-    ]);
+        'not-a-tool' => ['ran' => false, 'reason' => 'This version of the studio CLI cannot run it yet.'],
+    ])
+        ->and($results['peck']['ran'])->toBeFalse()
+        ->and($results['peck']['reason'])->toMatch('/^(Not set up in this project|Peck spellchecks with aspell)/');
 });
 
 it('runs every tool in plain output, never in an AI agent\'s compact format', function (): void {

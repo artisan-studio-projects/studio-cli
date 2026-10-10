@@ -16,6 +16,12 @@ class SubmitScanToolResultsRequest extends Request implements HasBody
     protected Method $method = Method::POST;
 
     /**
+     * Thousands of findings take the studio longer than a quick call: its own
+     * work on them is not cut short by the usual 30 seconds.
+     */
+    public const int TIMEOUT = 180;
+
+    /**
      * @param  array<string, mixed>  $results
      */
     public function __construct(
@@ -26,6 +32,14 @@ class SubmitScanToolResultsRequest extends Request implements HasBody
     public function resolveEndpoint(): string
     {
         return '/api/v1/projects/'.$this->project.'/scan/tools';
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function defaultConfig(): array
+    {
+        return ['timeout' => self::TIMEOUT];
     }
 
     /**

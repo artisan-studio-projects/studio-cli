@@ -29,6 +29,18 @@ class Pint extends Tool
         return [$bin, '--test', '--format=json', '-v', ...($this->offers($root, [$bin, '--help'], '--parallel') ? ['--parallel'] : [])];
     }
 
+    public function fixCommand(string $root): ?array
+    {
+        $bin = $this->bin($root, 'pint');
+
+        return $bin === null ? null : [$bin, ...($this->offers($root, [$bin, '--help'], '--parallel') ? ['--parallel'] : [])];
+    }
+
+    public function canFix(string $root): bool
+    {
+        return $this->bin($root, 'pint') !== null;
+    }
+
     public function isSetUp(string $root): bool
     {
         return $this->bin($root, 'pint') !== null;
@@ -59,7 +71,6 @@ class Pint extends Tool
                 ))
                 ->all())
             ->filter(fn (array $finding): bool => $finding['where'] !== '')
-            ->take(self::MOST_FINDINGS)
             ->values()
             ->all();
     }

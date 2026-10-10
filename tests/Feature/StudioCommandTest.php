@@ -181,22 +181,20 @@ it('makes only the ↗ after each workflow a link to its page, leaving the name 
         ->and(($this->widths)($workflows->all()))->toBe([120]);
 });
 
-it('puts a real View insights link above the rulesets, and keeps the ruleset rows plain', function () {
+it('puts a real View insights link on the health line, and keeps the rest of the tab plain', function () {
     $lines = collect(($this->screen)()->lines(120, 60, 'insights'));
     $summary = (string) $lines->first(fn (string $line): bool => str_contains($line, 'View insights'));
     $text = ($this->visibleText)($summary);
     $from = mb_strpos($text, 'View insights') + 1;
     $to = mb_strpos($text, '↗') + 1;
-    $rows = $lines->filter(fn (string $line): bool => str_contains($line, 'Security Vulnerabilities') || str_contains($line, 'Code Quality'));
+    $linked = $lines->filter(fn (string $line): bool => str_contains($line, "\e]8;;") || str_contains($line, '↗'));
 
     expect($text)->toContain('Health 68%')
         ->and(Canvas::linkAt($summary, $from))->toBe('https://studio.test/insights')
         ->and(Canvas::linkAt($summary, $to))->toBe('https://studio.test/insights')
         ->and(Canvas::linkAt($summary, $from - 1))->toBeNull()
         ->and(Canvas::linkAt($summary, 5))->toBeNull()
-        ->and($rows)->toHaveCount(2)
-        ->and($rows->implode(''))->not->toContain("\e]8;;")->not->toContain('↗')
-        ->and($lines->search($summary))->toBeLessThan($lines->search(fn (string $line): bool => str_contains($line, 'Security Vulnerabilities')))
+        ->and($linked)->toHaveCount(1)
         ->and(($this->widths)($lines->all()))->toBe([120]);
 });
 
@@ -347,7 +345,7 @@ it('opens on the tab it is given, and on the first when it does not know the one
 
     expect(($this->visibleText)(Artisan::output()))->toContain($expected);
 })->with([
-    'insights' => ['insights', 'Open issues by ruleset'],
+    'insights' => ['insights', 'Attempting to fix grouped issues'],
     'workflows' => ['workflows', 'Linear ticket estimation'],
     'activity' => ['activity', 'When a workflow finishes a step'],
     'one it does not know' => ['somewhere', '📦 Deliverables'],

@@ -53,7 +53,7 @@ trait HasTabs
         $besideUs = $this->shownRail()?->getInsteadOf();
 
         return collect($this->tabs === [] ? [Tab::make('Main')->components($this->getComponents())] : $this->tabs)
-            ->reject(fn (Tab $tab): bool => $tab->getKey() === $besideUs)
+            ->reject(fn (Tab $tab): bool => $tab->getKey() === $besideUs || ! $tab->isVisible())
             ->keyBy(fn (Tab $tab): string => $tab->getKey())
             ->all();
     }
